@@ -18,13 +18,15 @@
 
 ## 项目结构
 
+```
 meeting-agent/
-├── modules/        # 核心功能模块（asr, llm, database, exporter）
+├── modules/        # 核心功能模块
 ├── chains/         # LangChain 链
-├── rag/            # RAG 知识库（V2.0）
+├── rag/            # RAG 知识库
 ├── templates/      # 文档模板
 ├── storage/        # 文件存储
 ├── demo/           # 各成员 Demo
-├── app.py          # Streamlit 前端
-├── main.py         # 命令行入口
+├── app.py
+├── main.py
 └── requirements.txt
+```
