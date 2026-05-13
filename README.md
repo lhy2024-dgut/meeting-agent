@@ -13,7 +13,7 @@
 
 1. 从 dev 拉出 feature 分支：git checkout -b feature/你的功能名
 2. 开发完成后推送：git push origin feature/你的功能名
-3. 在 GitHub 发 PR，目标分支选 dev，指定组长 review
+3. 在 GitHub 发 PR，目标分支选 dev，指定其他人 review
 4. review 通过后合并，删除 feature 分支
 
 ## 项目结构
@@ -26,7 +26,7 @@ meeting-agent/
 ├── templates/      # 文档模板
 ├── storage/        # 文件存储
 ├── demo/           # 各成员 Demo
-├── app.py
-├── main.py
+├── app.py          # 前端
+├── main.py         # 命令行入口
 └── requirements.txt
 ```
