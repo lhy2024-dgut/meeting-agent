@@ -6,7 +6,7 @@ import streamlit as st
 
 def render_header():
     """顶部导航栏"""
-    cols = st.columns([3, 1, 1, 1, 1])
+    cols = st.columns([3, 1, 1, 1, 1, 1])
     with cols[0]:
         st.markdown(
             '<span style="font-size:20px;font-weight:800;color:#1A1A2E;letter-spacing:-0.02em">'
@@ -15,6 +15,7 @@ def render_header():
         )
     nav_pages = [
         ("upload", "📤 上传"),
+        ("chat", "💬 问答"),
         ("history", "📚 历史"),
         ("stats", "📊 统计"),
     ]

@@ -354,6 +354,7 @@ def inject():
         border-radius: 8px;
         margin-bottom: 0.75rem;
         line-height: 1.6;
+        color: #1E293B;
     }}
     .chat-bubble-user {{
         background: {CARD_BG};
@@ -362,6 +363,7 @@ def inject():
         border-radius: 8px;
         margin-bottom: 0.75rem;
         line-height: 1.6;
+        color: #1E293B;
     }}
 
     /* === CTA 卡片 === */
