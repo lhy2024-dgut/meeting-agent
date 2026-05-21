@@ -5,20 +5,6 @@ from pathlib import Path
 from pydub import AudioSegment
 
 
-def convert_to_wav(file_path):
-    """将音频/视频文件转换为 16kHz 单声道 WAV"""
-    out = Path(file_path).with_suffix(".converted.wav")
-    if out.exists():
-        out.unlink()
-    audio = (
-        AudioSegment.from_file(file_path)
-        .set_frame_rate(16000)
-        .set_channels(1)
-    )
-    audio.export(str(out), format="wav")
-    return str(out)
-
-
 def extract_audio_from_video(video_path):
     """从视频中提取音频"""
     output_path = Path(video_path).with_suffix(".wav")

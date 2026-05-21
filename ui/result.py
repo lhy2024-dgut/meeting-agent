@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """结果展示页"""
 
+import re
 from pathlib import Path
 
 import streamlit as st
 
+import config
 from agents.chat_agent import ChatAgent
 from db.repository import MeetingRepository
 from ui.components import empty_state, suggestion_pills
@@ -36,6 +38,8 @@ def page_result():
                 "resolutions": m.resolutions_text or "",
                 "transcript": " ".join(seg["text"] for seg in segments),
                 "segments": segments,
+                "duration_category": m.duration_category,
+                "environment": m.environment,
             }
 
     if not data:
@@ -85,9 +89,8 @@ def page_result():
         dur_min = int(duration_sec // 60)
         dur_str = f"{dur_min} 分钟" if dur_min < 60 else f"{dur_min // 60} 小时 {dur_min % 60} 分"
 
-        dur_cat, env = _classify_meeting(segments)
-        env_label = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}.get(env, "")
-        dur_label = {"short": "短会", "medium": "中等", "long": "长会"}.get(dur_cat, "")
+        env_label = config.ENV_LABELS.get(data.get("environment", ""), "")
+        dur_label = config.DURATION_LABELS.get(data.get("duration_category", ""), "")
 
         cols = st.columns(4)
         with cols[0]:
@@ -231,13 +234,20 @@ def render_chat(data):
     )
 
     try:
-        agent = ChatAgent()
-        agent.set_meeting_context(
-            data.get("transcript", ""),
-            data.get("minutes", ""),
-            data.get("action_items", ""),
-            data.get("resolutions", ""),
-        )
+        mid = data.get("meeting_id")
+        if st.session_state.get("result_agent_meeting_id") != mid:
+            agent = ChatAgent()
+            agent.set_meeting_context(
+                data.get("transcript", ""),
+                data.get("minutes", ""),
+                data.get("action_items", ""),
+                data.get("resolutions", ""),
+                meeting_id=mid,
+            )
+            st.session_state.result_agent = agent
+            st.session_state.result_agent_meeting_id = mid
+            st.session_state.result_messages = []
+        agent = st.session_state.result_agent
     except Exception:
         st.info("问答服务暂不可用")
         return
@@ -327,11 +337,7 @@ def _render_resolutions(resolution_text: str):
         stripped = line.strip()
         if not stripped:
             continue
-        # 去掉编号前缀
-        content = stripped
-        import re
-
-        content = re.sub(r"^\d+[\.\)、]\s*", "", content)
+        content = re.sub(r"^\d+[\.\)、]\s*", "", stripped)
         for prefix in ("- ", "• ", "* "):
             if content.startswith(prefix):
                 content = content[len(prefix) :]
@@ -347,8 +353,6 @@ def _render_resolutions(resolution_text: str):
 
 def _md_to_html(text: str) -> str:
     """简单的 Markdown → HTML 转换（纪要用）"""
-    import re
-
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html = re.sub(r"^### (.+)$", r"<h4>\1</h4>", html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
@@ -358,24 +362,3 @@ def _md_to_html(text: str) -> str:
     html = html.replace("\n\n", "</p><p>").replace("\n", "<br>")
     html = f"<p>{html}</p>"
     return html
-
-
-def _classify_meeting(segments):
-    """从 segments 推算会议分类"""
-    if not segments:
-        return "short", "quiet"
-    duration = max(seg.get("end", 0) for seg in segments)
-    count = len(segments)
-    if duration < 300:
-        dur_cat = "short"
-    elif duration < 1800:
-        dur_cat = "medium"
-    else:
-        dur_cat = "long"
-    if count > 100:
-        env = "multi_speaker"
-    elif count > 50:
-        env = "noisy"
-    else:
-        env = "quiet"
-    return dur_cat, env

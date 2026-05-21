@@ -115,8 +115,10 @@ def page_upload():
         with steps_placeholder.container():
             progress_steps(step)
 
+    transcript_display = st.empty()
     try:
-        result = svc.process(
+        result = None
+        for event in svc.process_stream(
             file_path,
             file_hash,
             title,
@@ -124,11 +126,22 @@ def page_upload():
             output_format=output_format,
             template_path=st.session_state.get("template_path"),
             progress_callback=on_progress,
-        )
+        ):
+            if event["type"] == "segment":
+                seg = event["segment"]
+                pct = event["progress"]["pct"]
+                progress_bar.progress(min(pct, 55))
+                status_text.markdown(event["progress"]["msg"])
+                # 实时展示最新转写片段
+                latest = [s["text"] for s in event["progress"]["segments"][-3:]]
+                transcript_display.caption(" ".join(latest))
+            elif event["type"] == "complete":
+                result = event["data"]
     except Exception as e:
         status_text.empty()
         progress_bar.empty()
         steps_placeholder.empty()
+        transcript_display.empty()
         error_card(
             "处理失败",
             f"错误信息：{str(e)[:200]}。请检查 Ollama 是否运行，或重试。",
@@ -137,6 +150,7 @@ def page_upload():
         )
         return
 
+    transcript_display.empty()
     progress_bar.progress(100)
     with steps_placeholder.container():
         progress_steps(4)

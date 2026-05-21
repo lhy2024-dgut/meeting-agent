@@ -4,7 +4,7 @@
 import streamlit as st
 
 from db.repository import MeetingRepository
-from ui.components import empty_state, metric_card
+from ui.components import empty_state
 
 
 def page_home():
@@ -14,7 +14,7 @@ def page_home():
     # Hero
     st.markdown(
         '<div style="padding: 3rem 0 1rem 0">'
-        '<div class="hero-title">智能会议纪要助手</div>'
+        '<div class="hero-title"><span>智能</span>会议纪要助手</div>'
         '<div class="hero-subtitle">'
         "上传会议录音或视频，AI 自动生成纪要、待办事项与决议"
         "</div>"

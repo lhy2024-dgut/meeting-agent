@@ -1,37 +1,95 @@
+import json
+import subprocess
 import time
 
 from faster_whisper import WhisperModel
-from pydub import AudioSegment
 
 import config
+from logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def _get_audio_info(audio_path):
+    """通过 ffprobe 获取音频时长和音量信息，无需 pydub"""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                audio_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        info = json.loads(result.stdout)
+
+        duration_sec = float(info.get("format", {}).get("duration", 0))
+
+        # 从 stream 中获取音量相关信息
+        streams = info.get("streams", [])
+        audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+        # 用 RMS / max_volume 等指标估算噪声水平
+        if audio_stream:
+            # 尝试获取 EBU R128 响度信息
+            try:
+                loud_result = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v", "quiet",
+                        "-print_format", "json",
+                        "-show_entries",
+                        "frame_tags=lavfi.r128.I",
+                        "-f", "lavfi",
+                        f"amovie={audio_path},ebur128=metadata=1",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                loud_info = json.loads(loud_result.stdout)
+                frames = loud_info.get("frames", [])
+                if frames:
+                    i_values = [
+                        float(f.get("tags", {}).get("lavfi.r128.I", "-70"))
+                        for f in frames
+                    ]
+                    integrated_loudness = sum(i_values) / len(i_values) if i_values else -30
+                    # 映射到 [0, 1]，-30 LUFS 视为安静, -5 LUFS 视为极吵
+                    noise_level = min(1.0, max(0.0, (integrated_loudness + 30) / 25))
+                    return duration_sec, noise_level
+            except Exception:
+                pass
+
+        # 回退：无法获取响度时使用默认值
+        noise_level = 0.3
+        return duration_sec, noise_level
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
+        logger.warning("ffprobe 获取音频信息失败: %s", e)
+        return 0, 0.3
 
 
 class ASREngine:
     """语音识别引擎，基于 Faster-Whisper (CTranslate2)"""
 
-    def __init__(self):
-        print("正在初始化语音识别模型...")
+    def __init__(self, model_name=None, device=None, compute_type=None):
+        logger.info("正在初始化语音识别模型...")
         try:
             self.model = WhisperModel(
-                config.WHISPER_MODEL,
-                device=config.WHISPER_DEVICE,
-                compute_type=config.WHISPER_COMPUTE_TYPE,
+                model_name or config.WHISPER_MODEL,
+                device=device or config.WHISPER_DEVICE,
+                compute_type=compute_type or config.WHISPER_COMPUTE_TYPE,
             )
-            print("[OK] Faster-Whisper 模型加载完成")
+            logger.info("Faster-Whisper 模型加载完成")
         except Exception as e:
-            print(f"加载失败 {e}，回退到 tiny 模型 + int8 量化")
+            logger.error("加载失败 %s，回退到 tiny 模型 + int8 量化", e)
             self.model = WhisperModel("tiny", device="cpu", compute_type="int8")
-
-    def _get_audio_info(self, audio_path):
-        try:
-            audio = AudioSegment.from_file(audio_path)
-            duration_sec = len(audio) / 1000.0
-            dbfs = audio.dBFS
-            noise_level = min(1.0, max(0.0, (dbfs + 30) / 25))
-        except Exception:
-            duration_sec = 0
-            noise_level = 0.3
-        return duration_sec, noise_level
 
     def _get_beam_size(self, duration_sec):
         return 3 if duration_sec < 300 else (8 if duration_sec > 1800 else 5)
@@ -47,13 +105,12 @@ class ASREngine:
         }
 
     def transcribe_iter(self, audio_path, progress_callback=None):
-        """生成器：逐 segment 返回识别结果，支持实时消费"""
-        duration_sec, noise_level = self._get_audio_info(audio_path)
+        duration_sec, noise_level = _get_audio_info(audio_path)
         beam_size = self._get_beam_size(duration_sec)
 
         segments_raw, info = self.model.transcribe(
             audio_path,
-            language="zh",
+            language=config.WHISPER_LANGUAGE,
             beam_size=beam_size,
             vad_filter=False,
             condition_on_previous_text=True,
@@ -67,7 +124,6 @@ class ASREngine:
             yield item, info.duration
 
     def transcribe(self, audio_path, progress_callback=None):
-        """批量转写：收集所有 segment 后返回列表"""
         segments = []
         duration = 0.0
         for item, dur in self.transcribe_iter(audio_path, progress_callback):
@@ -76,18 +132,13 @@ class ASREngine:
         return segments, duration
 
     @staticmethod
-    def classify_meeting_type(duration, num_speakers, noise_level):
+    def classify_duration(duration):
         if duration < 300:
-            dur = "short"
+            return "short"
         elif duration < 1800:
-            dur = "medium"
-        else:
-            dur = "long"
+            return "medium"
+        return "long"
 
-        if num_speakers > 3:
-            env = "multi_speaker"
-        elif noise_level > 0.5:
-            env = "noisy"
-        else:
-            env = "quiet"
-        return dur, env
+    @staticmethod
+    def classify_meeting_type(duration, num_speakers, noise_level):
+        return ASREngine.classify_duration(duration), "unknown"

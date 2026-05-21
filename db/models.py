@@ -1,3 +1,4 @@
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Column,
     DateTime,
@@ -51,3 +52,14 @@ class Transcription(Base):
     summary = Column(Text)
 
     meeting = relationship("Meeting", back_populates="transcriptions")
+
+
+class MeetingChunk(Base):
+    __tablename__ = "meeting_chunks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(
+        Integer, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chunk_text = Column(Text, nullable=False)
+    embedding = Column(Vector)

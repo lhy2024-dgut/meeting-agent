@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore", message=".*RunnableWithMessageHistory.*")
 from datetime import datetime
 from pathlib import Path
 
+import config
 from agents.chat_agent import ChatAgent
 from db.repository import MeetingRepository
 from engines.asr_engine import ASREngine
@@ -166,7 +167,7 @@ def cmd_history(args):
     print("-" * 75)
     for m in meetings:
         dur = {"short": "短", "medium": "中", "long": "长"}.get(m.duration_category, "?")
-        env = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}.get(m.environment, "?")
+        env = config.ENV_LABELS.get(m.environment, "?")
         ts = m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else ""
         print(f"{m.id:<6} {m.title[:28]:<30} {ts:<20} {dur:<6} {env}")
 

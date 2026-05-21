@@ -4,53 +4,74 @@ import warnings
 from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 
-# RunnableWithMessageHistory 在 langchain-core 1.x 中已弃用，推荐迁移到 LangGraph。
-# 当前仍可用，先屏蔽弃用警告，待后续版本统一迁移。
 warnings.filterwarnings("ignore", message=".*RunnableWithMessageHistory.*")
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-import config
+from engines.llm import get_llm
+from logger import get_logger
 from prompts.templates import CHAT_PROMPT
+from rag.retriever import get_retriever
+
+logger = get_logger(__name__)
 
 
 class ChatAgent:
-    """会议问答 Agent，基于 LangChain RunnableWithMessageHistory + RAG"""
+    """会议问答 Agent，支持依赖注入"""
 
-    _retriever = None
+    MAX_TRANSCRIPT_LEN = 6000
+    MAX_MINUTES_LEN = 2000
+    MAX_ITEMS_LEN = 1000
 
-    def __init__(self):
-        self.llm = config.get_llm(temperature=0.7)
+    def __init__(self, llm=None):
+        self.llm = llm or get_llm(temperature=0.7)
         self._session_store = {}
         self.meeting_context = {}
         self._session_id = str(uuid.uuid4())[:8]
 
-    @classmethod
-    def _get_retriever(cls):
-        if cls._retriever is None:
-            from rag.retriever import get_retriever
-            cls._retriever = get_retriever()
-        return cls._retriever
+    def set_meeting_context(self, transcript="", minutes="", action_items="", resolutions="", meeting_id=None):
+        transcript = transcript or ""
+        minutes = minutes or ""
+        action_items = action_items or ""
+        resolutions = resolutions or ""
 
-    def set_meeting_context(self, transcript="", minutes="", action_items="", resolutions=""):
+        for name, val, limit in [
+            ("transcript", transcript, self.MAX_TRANSCRIPT_LEN),
+            ("minutes", minutes, self.MAX_MINUTES_LEN),
+            ("action_items", action_items, self.MAX_ITEMS_LEN),
+            ("resolutions", resolutions, self.MAX_ITEMS_LEN),
+        ]:
+            if len(val) > limit:
+                logger.warning(
+                    "ChatAgent 上下文截断: %s (%d -> %d 字符)", name, len(val), limit,
+                )
+
         self.meeting_context = {
-            "transcript": (transcript or "")[:1000],
-            "minutes": (minutes or "")[:500],
-            "action_items": (action_items or "")[:300],
-            "resolutions": (resolutions or "")[:300],
+            "transcript": transcript[:self.MAX_TRANSCRIPT_LEN],
+            "minutes": minutes[:self.MAX_MINUTES_LEN],
+            "action_items": action_items[:self.MAX_ITEMS_LEN],
+            "resolutions": resolutions[:self.MAX_ITEMS_LEN],
+            "meeting_id": meeting_id,
         }
         self._session_id = str(uuid.uuid4())[:8]
 
     def _get_session_history(self, session_id) -> BaseChatMessageHistory:
         if session_id not in self._session_store:
+            if len(self._session_store) >= 16:
+                self._session_store.pop(next(iter(self._session_store)))
             self._session_store[session_id] = InMemoryChatMessageHistory()
-        return self._session_store[session_id]
+        history = self._session_store[session_id]
+        if len(history.messages) > 20:
+            history.messages = history.messages[-20:]
+        return history
 
     def chat(self, user_message):
-        # RAG 检索：从知识库搜索相关内容
         try:
-            rag_context = self._get_retriever().build_context(user_message, top_k=5)
+            rag_context = get_retriever().build_context(
+                user_message, top_k=5,
+                exclude_meeting_id=self.meeting_context.get("meeting_id"),
+            )
         except Exception as e:
-            print(f"[WARN] RAG 检索失败: {e}")
+            logger.warning("RAG 检索失败: %s", e)
             rag_context = ""
         if not rag_context:
             rag_context = "（暂无历史会议相关知识）"

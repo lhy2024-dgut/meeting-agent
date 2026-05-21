@@ -1,34 +1,25 @@
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import joinedload, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import joinedload
 
-import config
-from db.models import Base, Meeting, Transcription
+from db.engine import get_engine, get_session_factory
+from db.models import Meeting, Transcription
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class MeetingRepository:
-    def __init__(self):
-        self.engine = create_engine(
-            config.DATABASE_URL,
-            poolclass=QueuePool,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-            echo=False,
-        )
-        with self.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        print("[OK] 数据库已连接:", config.DATABASE_URL)
+    """会议数据仓库，支持依赖注入覆盖数据库连接"""
 
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+    def __init__(self, db_url=None):
+        self.engine = get_engine(url=db_url) if db_url else get_engine()
+        self.Session = get_session_factory(engine=self.engine)
 
     @contextmanager
-    def session_scope(self):
+    def _write_session(self):
+        """写事务：commit on success, rollback on error"""
         session = self.Session()
         try:
             yield session
@@ -39,10 +30,19 @@ class MeetingRepository:
         finally:
             session.close()
 
-    def create_meeting(
-        self, title, audio_path, duration_category, environment, file_hash=""
-    ):
-        with self.session_scope() as session:
+    @contextmanager
+    def _read_session(self):
+        """只读会话：不 commit，用完即关"""
+        session = self.Session()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    # ---- 写操作 ----
+
+    def create_meeting(self, title, audio_path, duration_category, environment, file_hash=""):
+        with self._write_session() as session:
             meeting = Meeting(
                 title=title,
                 audio_path=audio_path,
@@ -56,7 +56,7 @@ class MeetingRepository:
             return meeting.id
 
     def update_meeting_results(self, meeting_id, minutes, action_items, resolutions):
-        with self.session_scope() as session:
+        with self._write_session() as session:
             meeting = session.query(Meeting).filter_by(id=meeting_id).first()
             if meeting:
                 meeting.minutes_text = minutes
@@ -70,28 +70,32 @@ class MeetingRepository:
         mappings = []
         for seg in segments:
             text_content = seg.get("text", "")
-            mappings.append(
-                {
-                    "meeting_id": meeting_id,
-                    "text": text_content,
-                    "timestamp": seg.get("timestamp", 0.0),
-                    "start_time": seg.get("start", 0.0),
-                    "end_time": seg.get("end", 0.0),
-                    "summary": (
-                        text_content[:120] + "..."
-                        if len(text_content) > 120
-                        else text_content
-                    ),
-                    "audio_segment": seg.get("audio_segment", ""),
-                }
-            )
-        with self.session_scope() as session:
+            mappings.append({
+                "meeting_id": meeting_id,
+                "text": text_content,
+                "timestamp": seg.get("timestamp", 0.0),
+                "start_time": seg.get("start", 0.0),
+                "end_time": seg.get("end", 0.0),
+                "summary": text_content,
+                "audio_segment": seg.get("audio_segment", ""),
+            })
+        with self._write_session() as session:
             session.bulk_insert_mappings(Transcription, mappings)
+
+    def delete_meeting(self, meeting_id):
+        with self._write_session() as session:
+            meeting = session.query(Meeting).filter_by(id=meeting_id).first()
+            if meeting:
+                session.delete(meeting)
+                return True
+            return False
+
+    # ---- 读操作 ----
 
     def get_meeting_by_hash(self, file_hash):
         if not file_hash:
             return None
-        with self.session_scope() as session:
+        with self._read_session() as session:
             return (
                 session.query(Meeting)
                 .options(joinedload(Meeting.transcriptions))
@@ -100,7 +104,7 @@ class MeetingRepository:
             )
 
     def get_all_meetings(self):
-        with self.session_scope() as session:
+        with self._read_session() as session:
             return (
                 session.query(Meeting)
                 .options(joinedload(Meeting.transcriptions))
@@ -109,7 +113,7 @@ class MeetingRepository:
             )
 
     def get_meeting_by_id(self, meeting_id):
-        with self.session_scope() as session:
+        with self._read_session() as session:
             return (
                 session.query(Meeting)
                 .options(joinedload(Meeting.transcriptions))

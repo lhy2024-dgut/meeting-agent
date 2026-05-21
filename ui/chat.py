@@ -30,13 +30,19 @@ def page_chat():
     meeting = meeting_options[selected_label]
 
     transcript = " ".join(t.text for t in meeting.transcriptions)
-    agent = ChatAgent()
-    agent.set_meeting_context(
-        transcript,
-        meeting.minutes_text or "",
-        meeting.action_items_text or "",
-        meeting.resolutions_text or "",
-    )
+    if st.session_state.get("agent_meeting_id") != meeting.id:
+        agent = ChatAgent()
+        agent.set_meeting_context(
+            transcript,
+            meeting.minutes_text or "",
+            meeting.action_items_text or "",
+            meeting.resolutions_text or "",
+            meeting_id=meeting.id,
+        )
+        st.session_state.chat_agent = agent
+        st.session_state.agent_meeting_id = meeting.id
+        st.session_state.chat_messages = []
+    agent = st.session_state.chat_agent
 
     # 上下文信息
     with st.container(border=True):
@@ -49,7 +55,7 @@ def page_chat():
             st.caption(f"待办: {'有' if has_todos else '无'} · 决议: {'有' if has_resolutions else '无'}")
 
     # 初始化消息
-    if "chat_messages" not in st.session_state:
+    if not st.session_state.get("chat_messages"):
         st.session_state.chat_messages = [
             {
                 "role": "assistant",
