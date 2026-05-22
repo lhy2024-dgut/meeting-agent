@@ -226,12 +226,29 @@ def page_result():
 
 
 def render_chat(data):
-    """结果页底部会议问答"""
-    st.markdown(
-        '<div style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:0.5rem">'
-        "💬 会议问答</div>",
-        unsafe_allow_html=True,
-    )
+    """结果页底部会议问答 — 含 LangGraph Memory 轮次显示"""
+    # 标题行 + 轮次指示
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.markdown(
+            '<div style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:0.5rem">'
+            "💬 会议问答</div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        try:
+            agent_check = st.session_state.get("result_agent")
+            if agent_check:
+                stats = agent_check.get_memory_stats()
+                round_label = f"第 {stats['round_count']}/{stats['max_rounds']} 轮"
+                if stats["is_full"]:
+                    round_label += " ⚠️"
+                st.markdown(
+                    f'<span style="font-size:13px;color:#64748B">{round_label}</span>',
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            pass
 
     try:
         mid = data.get("meeting_id")
@@ -247,10 +264,15 @@ def render_chat(data):
             st.session_state.result_agent = agent
             st.session_state.result_agent_meeting_id = mid
             st.session_state.result_messages = []
-        agent = st.session_state.result_agent
+        agent: ChatAgent = st.session_state.result_agent
     except Exception:
         st.info("问答服务暂不可用")
         return
+
+    # 超出窗口提示
+    stats = agent.get_memory_stats()
+    if stats["trimmed"]:
+        st.caption("💡 对话已超出 10 轮上限，已自动裁剪最早对话")
 
     # 建议问题
     q = suggestion_pills(
@@ -292,14 +314,18 @@ def render_chat(data):
 
     prompt = q or (user_input if submitted else None)
     if prompt:
-        st.session_state.result_messages.append({"role": "user", "content": prompt})
-        with st.spinner("思考中..."):
-            try:
-                resp = agent.chat(prompt)
-            except Exception:
-                resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
-        st.session_state.result_messages.append({"role": "assistant", "content": resp})
-        st.rerun()
+        error = ChatAgent.validate_input(prompt)
+        if error:
+            st.toast(error, icon="⚠️")
+        else:
+            st.session_state.result_messages.append({"role": "user", "content": prompt})
+            with st.spinner("思考中..."):
+                try:
+                    resp = agent.chat(prompt)
+                except Exception:
+                    resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
+            st.session_state.result_messages.append({"role": "assistant", "content": resp})
+            st.rerun()
 
 
 # ---- 辅助函数 ----

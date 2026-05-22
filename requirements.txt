@@ -6,6 +6,7 @@ pandas
 plotly
 # pydub 已移除 — 改用 ffprobe（ffmpeg 自带）获取音频信息
 langchain-core
+langgraph
 docxtpl
 python-docx
 PyMuPDF
