@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+import config
 from db.repository import MeetingRepository
 
 
@@ -50,8 +51,8 @@ def page_stats():
     df = pd.DataFrame(
         [
             {
-                "时长": {"short": "短会", "medium": "中等", "long": "长会"}.get(m.duration_category, "未知"),
-                "环境": {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}.get(m.environment, "未知"),
+                "时长": config.DURATION_LABELS.get(m.duration_category, "未知"),
+                "环境": config.ENV_LABELS.get(m.environment, "未知"),
                 "日期": m.created_at,
             }
             for m in meetings

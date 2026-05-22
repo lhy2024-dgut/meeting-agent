@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """结果展示页"""
 
+import re
 from pathlib import Path
 
 import streamlit as st
 
+import config
 from agents.chat_agent import ChatAgent
 from db.repository import MeetingRepository
 from ui.components import empty_state, suggestion_pills
@@ -36,6 +38,8 @@ def page_result():
                 "resolutions": m.resolutions_text or "",
                 "transcript": " ".join(seg["text"] for seg in segments),
                 "segments": segments,
+                "duration_category": m.duration_category,
+                "environment": m.environment,
             }
 
     if not data:
@@ -85,9 +89,8 @@ def page_result():
         dur_min = int(duration_sec // 60)
         dur_str = f"{dur_min} 分钟" if dur_min < 60 else f"{dur_min // 60} 小时 {dur_min % 60} 分"
 
-        dur_cat, env = _classify_meeting(segments)
-        env_label = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}.get(env, "")
-        dur_label = {"short": "短会", "medium": "中等", "long": "长会"}.get(dur_cat, "")
+        env_label = config.ENV_LABELS.get(data.get("environment", ""), "")
+        dur_label = config.DURATION_LABELS.get(data.get("duration_category", ""), "")
 
         cols = st.columns(4)
         with cols[0]:
@@ -223,24 +226,53 @@ def page_result():
 
 
 def render_chat(data):
-    """结果页底部会议问答"""
-    st.markdown(
-        '<div style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:0.5rem">'
-        "💬 会议问答</div>",
-        unsafe_allow_html=True,
-    )
+    """结果页底部会议问答 — 含 LangGraph Memory 轮次显示"""
+    # 标题行 + 轮次指示
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.markdown(
+            '<div style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:0.5rem">'
+            "💬 会议问答</div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        try:
+            agent_check = st.session_state.get("result_agent")
+            if agent_check:
+                stats = agent_check.get_memory_stats()
+                round_label = f"第 {stats['round_count']}/{stats['max_rounds']} 轮"
+                if stats["is_full"]:
+                    round_label += " ⚠️"
+                st.markdown(
+                    f'<span style="font-size:13px;color:#64748B">{round_label}</span>',
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            pass
 
     try:
-        agent = ChatAgent()
-        agent.set_meeting_context(
-            data.get("transcript", ""),
-            data.get("minutes", ""),
-            data.get("action_items", ""),
-            data.get("resolutions", ""),
-        )
+        mid = data.get("meeting_id")
+        if st.session_state.get("result_agent_meeting_id") != mid:
+            agent = ChatAgent()
+            agent.set_meeting_context(
+                data.get("transcript", ""),
+                data.get("minutes", ""),
+                data.get("action_items", ""),
+                data.get("resolutions", ""),
+                meeting_id=mid,
+            )
+            st.session_state.result_agent = agent
+            st.session_state.result_agent_meeting_id = mid
+            st.session_state.result_messages = []
+        agent: ChatAgent = st.session_state.result_agent
     except Exception:
         st.info("问答服务暂不可用")
         return
+
+    # 超出窗口提示
+    stats = agent.get_memory_stats()
+    if stats["trimmed"]:
+        st.caption("💡 对话已超出 10 轮上限，已自动裁剪最早对话")
 
     # 建议问题
     q = suggestion_pills(
@@ -282,14 +314,18 @@ def render_chat(data):
 
     prompt = q or (user_input if submitted else None)
     if prompt:
-        st.session_state.result_messages.append({"role": "user", "content": prompt})
-        with st.spinner("思考中..."):
-            try:
-                resp = agent.chat(prompt)
-            except Exception:
-                resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
-        st.session_state.result_messages.append({"role": "assistant", "content": resp})
-        st.rerun()
+        error = ChatAgent.validate_input(prompt)
+        if error:
+            st.toast(error, icon="⚠️")
+        else:
+            st.session_state.result_messages.append({"role": "user", "content": prompt})
+            with st.spinner("思考中..."):
+                try:
+                    resp = agent.chat(prompt)
+                except Exception:
+                    resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
+            st.session_state.result_messages.append({"role": "assistant", "content": resp})
+            st.rerun()
 
 
 # ---- 辅助函数 ----
@@ -327,11 +363,7 @@ def _render_resolutions(resolution_text: str):
         stripped = line.strip()
         if not stripped:
             continue
-        # 去掉编号前缀
-        content = stripped
-        import re
-
-        content = re.sub(r"^\d+[\.\)、]\s*", "", content)
+        content = re.sub(r"^\d+[\.\)、]\s*", "", stripped)
         for prefix in ("- ", "• ", "* "):
             if content.startswith(prefix):
                 content = content[len(prefix) :]
@@ -347,8 +379,6 @@ def _render_resolutions(resolution_text: str):
 
 def _md_to_html(text: str) -> str:
     """简单的 Markdown → HTML 转换（纪要用）"""
-    import re
-
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html = re.sub(r"^### (.+)$", r"<h4>\1</h4>", html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
@@ -358,24 +388,3 @@ def _md_to_html(text: str) -> str:
     html = html.replace("\n\n", "</p><p>").replace("\n", "<br>")
     html = f"<p>{html}</p>"
     return html
-
-
-def _classify_meeting(segments):
-    """从 segments 推算会议分类"""
-    if not segments:
-        return "short", "quiet"
-    duration = max(seg.get("end", 0) for seg in segments)
-    count = len(segments)
-    if duration < 300:
-        dur_cat = "short"
-    elif duration < 1800:
-        dur_cat = "medium"
-    else:
-        dur_cat = "long"
-    if count > 100:
-        env = "multi_speaker"
-    elif count > 50:
-        env = "noisy"
-    else:
-        env = "quiet"
-    return dur_cat, env

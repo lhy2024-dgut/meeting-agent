@@ -3,8 +3,10 @@
 
 import streamlit as st
 
+import config
 from db.repository import MeetingRepository
-from ui.components import empty_state, status_pill
+from rag.retriever import get_retriever
+from ui.components import empty_state
 
 
 def page_history():
@@ -90,12 +92,8 @@ def page_history():
             with c1:
                 st.markdown(f"**{m.title or '未命名会议'}**")
                 ts = m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else ""
-                dur_label = {"short": "短会", "medium": "中等", "long": "长会"}.get(
-                    m.duration_category, ""
-                )
-                env_label = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}.get(
-                    m.environment, ""
-                )
+                dur_label = config.DURATION_LABELS.get(m.duration_category, "")
+                env_label = config.ENV_LABELS.get(m.environment, "")
                 st.caption(f"{ts} · {dur_label} · {env_label}")
 
                 # 摘要
@@ -117,11 +115,28 @@ def page_history():
 
             with c2:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("📖 查看", key=f"hist_view_{m.id}", width='stretch'):
-                    st.session_state.view_meeting_id = m.id
-                    st.session_state.data = None
-                    st.session_state.page = "result"
-                    st.rerun()
+                col_v, col_d = st.columns(2)
+                with col_v:
+                    if st.button("📖 查看", key=f"hist_view_{m.id}", use_container_width=True):
+                        st.session_state.view_meeting_id = m.id
+                        st.session_state.data = None
+                        st.session_state.page = "result"
+                        st.rerun()
+                with col_d:
+                    confirm_key = f"hist_del_confirm_{m.id}"
+                    if st.session_state.get(confirm_key):
+                        if st.button("⚠️ 确认", key=f"hist_del_ok_{m.id}", use_container_width=True, type="primary"):
+                            db.delete_meeting(m.id)
+                            try:
+                                get_retriever().remove_meeting(m.id)
+                            except Exception:
+                                pass
+                            st.session_state[confirm_key] = False
+                            st.rerun()
+                    else:
+                        if st.button("🗑 删除", key=f"hist_del_{m.id}", use_container_width=True, type="secondary"):
+                            st.session_state[confirm_key] = True
+                            st.rerun()
 
     # 分页导航
     if total_pages > 1:

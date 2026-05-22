@@ -5,14 +5,17 @@ from docxtpl import DocxTemplate, RichText
 
 import config
 from engines.pdf_engine import PDFEngine
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ExportChain:
     """文档导出链，支持 docx / md / pdf"""
 
-    def __init__(self):
-        self.output_dir = config.OUTPUT_DIR
-        self.pdf_engine = PDFEngine()
+    def __init__(self, output_dir=None, pdf_engine=None):
+        self.output_dir = output_dir or config.OUTPUT_DIR
+        self.pdf_engine = pdf_engine or PDFEngine()
 
     def run(self, data, output_format="docx", template_path=None):
         context = {

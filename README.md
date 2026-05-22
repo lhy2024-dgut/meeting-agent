@@ -64,11 +64,7 @@ meeting-agent/
 │   └── global_css.py       # 全局样式主题
 │
 ├── storage/                # 本地存储
-│   ├── audio/              # 上传的音频文件
-│   ├── video/              # 上传的视频文件
-│   ├── output/             # 导出的文档
-│   ├── templates/          # 自定义导出模板
-│   └── vector_store/       # FAISS 向量索引
-│
-└── demo/                   # 各成员 Demo（不受代码审查）
-```
+    ├── audio/              # 上传的音频文件
+    ├── video/              # 上传的视频文件
+    ├── templates/          # 自定义导出模板
+    └── vector_store/       # FAISS 向量索引

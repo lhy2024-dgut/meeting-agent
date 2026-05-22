@@ -4,14 +4,17 @@ from pathlib import Path
 
 import config
 from engines.audio_utils import extract_audio_from_video
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class FileService:
-    def __init__(self):
-        self.audio_dir = config.AUDIO_DIR
-        self.video_dir = config.VIDEO_DIR
-        self.output_dir = config.OUTPUT_DIR
-        self.template_dir = config.TEMPLATE_DIR
+    def __init__(self, audio_dir=None, video_dir=None, output_dir=None, template_dir=None):
+        self.audio_dir = audio_dir or config.AUDIO_DIR
+        self.video_dir = video_dir or config.VIDEO_DIR
+        self.output_dir = output_dir or config.OUTPUT_DIR
+        self.template_dir = template_dir or config.TEMPLATE_DIR
 
     def save_uploaded(self, uploaded_file, file_type="audio"):
         file_bytes = uploaded_file.getvalue()

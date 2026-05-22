@@ -4,14 +4,14 @@ psycopg2-binary
 faster-whisper
 pandas
 plotly
-pydub
-faiss-cpu
-langchain
+# pydub 已移除 — 改用 ffprobe（ffmpeg 自带）获取音频信息
 langchain-core
-langchain-community
+langgraph
 docxtpl
 python-docx
 PyMuPDF
 pypdf
 ollama
+pgvector
 python-dotenv
+alembic

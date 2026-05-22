@@ -79,9 +79,9 @@ class SimpleTextSplitter:
                 current += chunk
             else:
                 merged.append(current)
-                # overlap: 下一个 chunk 开头带上当前 chunk 尾部的一部分
                 if self.chunk_overlap > 0 and len(current) > self.chunk_overlap:
-                    current = current[-self.chunk_overlap:] + chunk
+                    combined = current[-self.chunk_overlap:] + chunk
+                    current = combined[:self.chunk_size]
                 else:
                     current = chunk
 
