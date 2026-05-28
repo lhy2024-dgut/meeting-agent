@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
 STORAGE_DIR = ROOT_DIR / "storage"
 STORAGE_DIR.mkdir(exist_ok=True)
 (AUDIO_DIR := STORAGE_DIR / "audio").mkdir(exist_ok=True)

@@ -1,4 +1,4 @@
-"""initial_schema
+"""initial_schema — pgvector 降级版
 
 Revision ID: d69ff883dd59
 Revises:
@@ -8,7 +8,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from pgvector.sqlalchemy import Vector
 
 
 revision: str = 'd69ff883dd59'
@@ -18,8 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-
     op.create_table(
         'meetings',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
@@ -61,7 +58,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('meeting_id', sa.Integer(), nullable=False),
         sa.Column('chunk_text', sa.Text(), nullable=False),
-        sa.Column('embedding', Vector(), nullable=True),
+        sa.Column('embedding', sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(['meeting_id'], ['meetings.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         if_not_exists=True,
@@ -69,15 +66,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meeting_chunks_meeting_id'), 'meeting_chunks', ['meeting_id'],
                     unique=False, if_not_exists=True)
 
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-        ON meeting_chunks USING ivfflat (embedding vector_cosine_ops)
-        WITH (lists = 100)
-    """)
-
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_chunks_embedding")
     op.drop_index(op.f('ix_meeting_chunks_meeting_id'), table_name='meeting_chunks')
     op.drop_table('meeting_chunks')
     op.drop_index(op.f('ix_transcriptions_meeting_id'), table_name='transcriptions')

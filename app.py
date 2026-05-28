@@ -37,6 +37,12 @@ PAGE_MAP = {
 
 module_name = PAGE_MAP.get(st.session_state.page, "ui.home")
 import importlib
+import sys
+
+# 清除项目模块缓存，确保文件改动后热重载立即生效
+_RELOAD_PREFIXES = ("ui.", "chains.", "services.", "prompts.", "engines.", "agents.", "rag.")
+for _mod in [k for k in sys.modules if any(k.startswith(p) for p in _RELOAD_PREFIXES)]:
+    del sys.modules[_mod]
 
 module = importlib.import_module(module_name)
 

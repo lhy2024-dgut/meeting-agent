@@ -1,6 +1,8 @@
+import time
+
 from chains.minutes_chain import MinutesChain
 from chains.export_chain import ExportChain
-from engines.asr_engine import ASREngine
+from engines.asr_engine import ASREngine, _get_audio_duration, _PARALLEL_MIN_SEC
 from logger import get_logger
 from rag.retriever import get_retriever
 
@@ -37,6 +39,8 @@ class MeetingService:
         output_format="docx",
         template_path=None,
         progress_callback=None,
+        scene="通用会议",
+        custom_headings=None,
     ):
         """批量处理：ASR → 分类 → LLM → 持久化 → RAG → 导出"""
         cached = self.db.get_meeting_by_hash(file_hash)
@@ -53,6 +57,7 @@ class MeetingService:
         return self._finalize(
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
+            scene=scene, custom_headings=custom_headings,
         )
 
     def process_stream(
@@ -64,26 +69,56 @@ class MeetingService:
         output_format="docx",
         template_path=None,
         progress_callback=None,
+        scene="通用会议",
+        custom_headings=None,
     ):
-        """流式处理：边转写边返回结果"""
-        progress = {"pct": 0, "msg": "", "segments": [], "transcript_parts": []}
+        """流式处理：边转写边返回结果；长音频自动切换并行模式"""
+        asr_start = time.time()
 
-        for item, duration in self.asr.transcribe_iter(file_path):
-            progress["segments"].append(item)
-            progress["transcript_parts"].append(item.get("text", ""))
-            progress["pct"] = min(55, int(item["end"] / max(duration, 1) * 55))
-            progress["msg"] = f"🎤 实时转写... [{item['end']:.0f}s / {duration:.0f}s]"
-            if progress_callback:
-                progress_callback(progress["pct"], progress["msg"])
-            yield {"type": "segment", "segment": item, "progress": dict(progress)}
+        duration_s = _get_audio_duration(file_path)
+        use_parallel = duration_s >= _PARALLEL_MIN_SEC
 
-        transcript = " ".join(progress["transcript_parts"])
-        segments = progress["segments"]
+        if use_parallel:
+            segments = []
+            for event in self.asr.transcribe_parallel_iter(file_path):
+                if event["type"] == "chunk_done":
+                    elapsed = time.time() - asr_start
+                    msg = (
+                        f"🎤 并行转写... [{event['completed']}/{event['total']} 片段完成]"
+                        f"  ⏱ {elapsed:.0f}s"
+                    )
+                    if progress_callback:
+                        progress_callback(event["pct"], msg)
+                    yield {"type": "parallel_progress", "pct": event["pct"], "msg": msg,
+                           "completed": event["completed"], "total": event["total"]}
+                elif event["type"] == "complete":
+                    segments = event["segments"]
+            transcript = " ".join(seg.get("text", "") for seg in segments)
+        else:
+            progress = {"pct": 0, "msg": "", "segments": [], "transcript_parts": []}
+            for item, duration in self.asr.transcribe_iter(file_path):
+                progress["segments"].append(item)
+                progress["transcript_parts"].append(item.get("text", ""))
+                elapsed = time.time() - asr_start
+                progress["pct"] = min(55, int(item["end"] / max(duration, 1) * 55))
+                progress["msg"] = (
+                    f"🎤 实时转写... [{item['end']:.0f}s / {duration:.0f}s]"
+                    f"  ⏱ {elapsed:.0f}s"
+                )
+                if progress_callback:
+                    progress_callback(progress["pct"], progress["msg"])
+                yield {"type": "segment", "segment": item, "progress": dict(progress)}
+            transcript = " ".join(progress["transcript_parts"])
+            segments = progress["segments"]
+
+        asr_time = time.time() - asr_start
 
         final = self._finalize(
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
+            scene=scene, custom_headings=custom_headings,
         )
+        final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
 
         if progress_callback:
@@ -142,6 +177,8 @@ class MeetingService:
         output_format="docx",
         template_path=None,
         progress_callback=None,
+        scene="通用会议",
+        custom_headings=None,
     ):
         """Steps 3-7: 分类 → LLM 提取 → 持久化 → RAG 索引 → 导出"""
         # Step 3: 分类（仅基于客观时长，environment 存 "unknown" 等后续 speaker diarization）
@@ -159,7 +196,8 @@ class MeetingService:
             progress_callback(65, "🤖 生成会议纪要...")
         date_str = meeting_dt.strftime("%Y-%m-%d %H:%M")
         action_items, resolutions, minutes = self.minutes_chain.run(
-            transcript, title=title, date=date_str
+            transcript, title=title, date=date_str,
+            scene=scene, custom_headings=custom_headings,
         )
 
         if not (minutes or "").strip():

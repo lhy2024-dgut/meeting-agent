@@ -1,4 +1,5 @@
-from pgvector.sqlalchemy import Vector
+# models.py — pgvector 降级版
+# embedding 字段改用 Text 存储 JSON 字符串，待 pgvector 安装成功后恢复
 from sqlalchemy import (
     Column,
     DateTime,
@@ -62,4 +63,6 @@ class MeetingChunk(Base):
         Integer, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
     )
     chunk_text = Column(Text, nullable=False)
-    embedding = Column(Vector)
+    # 原来是 Vector 类型，临时改为 Text 存 JSON 字符串
+    # 待 pgvector 安装成功后改回：from pgvector.sqlalchemy import Vector; embedding = Column(Vector(1024))
+    embedding = Column(Text)

@@ -1,5 +1,14 @@
 """Ollama LLM 封装 — 绕过 langchain-ollama 解析 bug，支持依赖注入"""
 
+import os
+
+# 确保 localhost Ollama 连接不走系统代理（兼容 Clash/V2Ray 等软件开启系统代理的场景）
+_no_proxy = os.environ.get("NO_PROXY", os.environ.get("no_proxy", ""))
+if "localhost" not in _no_proxy:
+    _combined = ",".join(filter(None, [_no_proxy, "localhost", "127.0.0.1"]))
+    os.environ["NO_PROXY"] = _combined
+    os.environ["no_proxy"] = _combined
+
 from typing import Any, Iterator, Optional, Sequence
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -34,6 +43,14 @@ def _sanitize_text(text):
 
 
 sanitize_text = _sanitize_text
+
+_THINKING_MODELS = ("qwen3", "qwq", "deepseek-r1")
+
+
+def _supports_thinking(model_name: str) -> bool:
+    """判断模型是否支持 think 参数（Qwen3/QwQ/DeepSeek-R1 等 reasoning 模型）"""
+    m = model_name.lower()
+    return any(t in m for t in _THINKING_MODELS)
 
 
 # ---------------------------------------------------------------------------
@@ -80,9 +97,10 @@ class OllamaChatModel(BaseChatModel):
         if stop:
             options["stop"] = stop
         try:
-            response = self._client.chat(
-                model=self.model, messages=ollama_messages, options=options, think=False,
-            )
+            chat_kwargs = dict(model=self.model, messages=ollama_messages, options=options)
+            if _supports_thinking(self.model):
+                chat_kwargs["think"] = False
+            response = self._client.chat(**chat_kwargs)
             content = _sanitize_text(response.message.content or "")
         except Exception as e:
             raise OllamaLLMError(
@@ -104,9 +122,10 @@ class OllamaChatModel(BaseChatModel):
         if stop:
             options["stop"] = stop
         try:
-            stream = self._client.chat(
-                model=self.model, messages=ollama_messages, options=options, think=False, stream=True,
-            )
+            chat_kwargs = dict(model=self.model, messages=ollama_messages, options=options, stream=True)
+            if _supports_thinking(self.model):
+                chat_kwargs["think"] = False
+            stream = self._client.chat(**chat_kwargs)
             for chunk in stream:
                 delta = chunk.get("message", {}).get("content", "")
                 if delta:

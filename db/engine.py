@@ -1,4 +1,6 @@
-from sqlalchemy import create_engine, event
+# engine.py — pgvector 降级版
+# 移除了 pgvector 适配器注册，其余逻辑不变
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -17,26 +19,7 @@ def get_engine(url=None):
         pool_recycle=3600,
         echo=False,
     )
-    _register_vector_adapters(engine)
     return engine
-
-
-def _register_vector_adapters(engine):
-    """在 psycopg2 连接上注册 pgvector 类型适配器"""
-    try:
-        from pgvector.psycopg2 import register_vector
-
-        @event.listens_for(engine, "connect")
-        def _on_connect(dbapi_connection, _connection_record):
-            try:
-                dbapi_connection.autocommit = True
-                dbapi_connection.cursor().execute("CREATE EXTENSION IF NOT EXISTS vector")
-                dbapi_connection.autocommit = False
-                register_vector(dbapi_connection)
-            except Exception:
-                pass
-    except ImportError:
-        pass
 
 
 def get_session_factory(engine=None):
