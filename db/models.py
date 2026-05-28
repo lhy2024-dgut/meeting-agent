@@ -28,6 +28,8 @@ class Meeting(Base):
     minutes_text = Column(Text)
     action_items_text = Column(Text)
     resolutions_text = Column(Text)
+    short_summary = Column(String(500))
+    project_name = Column(String(255))
 
     transcriptions = relationship(
         "Transcription",
@@ -61,5 +63,9 @@ class MeetingChunk(Base):
     meeting_id = Column(
         Integer, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    chunk_type = Column(String(32), nullable=False, default="unknown")
+    chunk_index = Column(Integer, nullable=False, default=0)
     chunk_text = Column(Text, nullable=False)
+    content_hash = Column(String(64), nullable=False, default="")
     embedding = Column(Vector)
+    created_at = Column(DateTime)

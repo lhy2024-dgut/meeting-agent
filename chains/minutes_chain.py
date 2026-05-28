@@ -68,12 +68,14 @@ class MinutesChain:
         for attempt in range(self.MAX_RETRY + 1):
             try:
                 raw = self.chain.invoke(params)
+                # LCEL 链返回 AIMessage，解析器需要字符串
+                raw_text = raw.content if hasattr(raw, "content") else str(raw)
             except OllamaLLMError:
                 if attempt < self.MAX_RETRY:
                     logger.warning("LLM 调用失败，重试 %s/%s", attempt + 1, self.MAX_RETRY)
                     continue
                 raise
-            action, resolutions, minutes = self.parser.parse(raw)
+            action, resolutions, minutes = self.parser.parse(raw_text)
             if minutes.strip() and minutes.strip() != "请查看会议纪要":
                 break
             if attempt < self.MAX_RETRY:

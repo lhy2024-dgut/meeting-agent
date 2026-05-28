@@ -302,14 +302,21 @@ def render_chat(data):
 
     # 输入
     with st.form("result_chat_form", clear_on_submit=True):
-        cols = st.columns([5, 1])
-        with cols[0]:
-            user_input = st.text_input(
-                "输入问题",
-                placeholder="基于会议内容提问...",
-                label_visibility="collapsed",
-            )
-        with cols[1]:
+        user_input = st.text_area(
+            "输入问题",
+            placeholder="基于会议内容提问...（最多500字）",
+            label_visibility="collapsed",
+            height=68,
+            key="result_chat_input",
+        )
+        n_chars = len(user_input) if user_input else 0
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            if n_chars > ChatAgent.MAX_USER_INPUT_LEN:
+                st.caption(f"⚠️ {n_chars}/{ChatAgent.MAX_USER_INPUT_LEN} 已超限")
+            elif n_chars > 0:
+                st.caption(f"{n_chars}/{ChatAgent.MAX_USER_INPUT_LEN}")
+        with c2:
             submitted = st.form_submit_button("发送 →", width='stretch')
 
     prompt = q or (user_input if submitted else None)

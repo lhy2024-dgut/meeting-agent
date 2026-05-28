@@ -5,12 +5,13 @@
   3. 10 轮滑窗裁剪
   4. LangGraph checkpoint 状态完整性
   5. 输入校验
+  6. 语义连续性（第 10 轮仍能引用第 1 轮的上下文）
 """
 
 import unittest
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agents.chat_agent import ChatAgent
 
@@ -19,6 +20,19 @@ def _make_mock_llm(response_text="Mock response"):
     """构造返回真实 AIMessage 的 mock LLM，兼容 LangGraph add_messages 的 reducer"""
     llm = MagicMock()
     llm.invoke.return_value = AIMessage(content=response_text)
+    return llm
+
+
+def _make_spy_llm():
+    """构造 spy LLM，捕获每次 invoke 收到的 messages，便于验证上下文连续性"""
+    llm = MagicMock()
+    llm.invoke_call_args = []
+
+    def _invoke_side_effect(messages):
+        llm.invoke_call_args.append(messages)
+        return AIMessage(content="Mock response")
+
+    llm.invoke.side_effect = _invoke_side_effect
     return llm
 
 
@@ -164,6 +178,69 @@ class TestChatMemory(unittest.TestCase):
     def test_validate_valid_input(self):
         """正常输入返回 None"""
         self.assertIsNone(ChatAgent.validate_input("这个会议的核心议题是什么？"))
+
+    # ── 语义连续性：第 10 轮仍能引用第 1 轮上下文 ──
+
+    def test_round_10_references_round_1_context(self):
+        """第 10 轮调用 LLM 时，消息列表中仍包含第 1 轮的用户输入"""
+        spy_llm = _make_spy_llm()
+        agent = ChatAgent(llm=spy_llm)
+        agent.set_meeting_context(transcript="关于Q3预算的讨论", meeting_id=100)
+
+        round_1_question = "Q1: 我叫张三，我的工号是9527"
+        agent.chat(round_1_question)
+
+        for i in range(2, 11):
+            agent.chat(f"Q{i}: 继续讨论预算问题")
+
+        # 第 10 轮（共 20 条非系统消息，尚未触发裁剪）调用 LLM 时传入的 messages
+        msgs_round_10 = spy_llm.invoke_call_args[-1]
+
+        # 过滤出非系统消息
+        non_system = [m for m in msgs_round_10 if not isinstance(m, SystemMessage)]
+
+        # 第 1 轮的 HumanMessage 仍在列表中
+        first_round_texts = [m.content for m in non_system if isinstance(m, HumanMessage)]
+        self.assertIn(round_1_question, first_round_texts,
+                      "第 10 轮时第 1 轮的用户问题应该在上下文中")
+
+        # 第 10 轮处理时 state 中已有 19 条非系统消息
+        # （10 条 Human + 9 条 AI，第 10 轮 AI 尚未生成）
+        self.assertEqual(len(non_system), 19,
+                         f"第 10 轮应有 19 条非系统消息，实际 {len(non_system)}")
+
+        stats = agent.get_memory_stats()
+        self.assertEqual(stats["round_count"], 10)
+        self.assertFalse(stats["trimmed"],
+                         "第 10 轮不应触发裁剪（恰好满窗口）")
+
+    def test_round_11_trims_round_1_context(self):
+        """第 11 轮触发裁剪后，第 1 轮的消息被移除"""
+        spy_llm = _make_spy_llm()
+        agent = ChatAgent(llm=spy_llm)
+        agent.set_meeting_context(transcript="关于Q3预算的讨论", meeting_id=101)
+
+        round_1_question = "Q1: 我叫张三，我的工号是9527"
+        agent.chat(round_1_question)
+
+        for i in range(2, 12):  # 2..11, 共 10 轮
+            agent.chat(f"Q{i}: 继续讨论预算问题")
+
+        # 第 11 轮触发了裁剪
+        self.assertTrue(agent.get_memory_stats()["trimmed"])
+
+        # 第 11 轮调用 LLM 时传入的 messages
+        msgs_round_11 = spy_llm.invoke_call_args[-1]
+        non_system = [m for m in msgs_round_11 if not isinstance(m, SystemMessage)]
+
+        # 裁剪后应保留最近 20 条，第 1 轮的消息已被移除
+        first_round_texts = [m.content for m in non_system if isinstance(m, HumanMessage)]
+        self.assertNotIn(round_1_question, first_round_texts,
+                         "第 11 轮裁剪后第 1 轮的问题应该已被移除")
+
+        # 保留 20 条非系统消息
+        self.assertEqual(len(non_system), 20,
+                         f"裁剪后应保留 20 条，实际 {len(non_system)}")
 
 
 if __name__ == "__main__":
