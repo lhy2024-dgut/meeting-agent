@@ -47,7 +47,7 @@ meeting-agent/
 │
 ├── rag/                    # RAG 知识库
 │   ├── embeddings.py       # bge-m3 向量嵌入
-│   ├── retriever.py        # FAISS 检索器
+│   ├── retriever.py        # PGVector 检索器
 │   └── text_splitter.py    # 中文文本分块
 │
 ├── prompts/                # Prompt 模板
@@ -67,4 +67,4 @@ meeting-agent/
     ├── audio/              # 上传的音频文件
     ├── video/              # 上传的视频文件
     ├── templates/          # 自定义导出模板
-    └── vector_store/       # FAISS 向量索引
+    └── vector_store/       # PGVector 向量索引

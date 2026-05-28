@@ -29,6 +29,8 @@ class Meeting(Base):
     minutes_text = Column(Text)
     action_items_text = Column(Text)
     resolutions_text = Column(Text)
+    short_summary = Column(String(500))
+    project_name = Column(String(255))
 
     transcriptions = relationship(
         "Transcription",
@@ -62,7 +64,10 @@ class MeetingChunk(Base):
     meeting_id = Column(
         Integer, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    chunk_type = Column(String(32), nullable=False, default="unknown")
+    chunk_index = Column(Integer, nullable=False, default=0)
     chunk_text = Column(Text, nullable=False)
-    # 原来是 Vector 类型，临时改为 Text 存 JSON 字符串
-    # 待 pgvector 安装成功后改回：from pgvector.sqlalchemy import Vector; embedding = Column(Vector(1024))
+    content_hash = Column(String(64), nullable=False, default="")
+    # pgvector 未安装时降级为 Text 存 JSON 字符串；待 pgvector 就绪后改回 Column(Vector(1024))
     embedding = Column(Text)
+    created_at = Column(DateTime)

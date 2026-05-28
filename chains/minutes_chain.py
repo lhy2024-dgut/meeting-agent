@@ -214,6 +214,7 @@ class MinutesChain:
                 logger.debug("JSON 解析失败，回退至 ===SECTION=== 解析器")
                 action_items, resolutions, minutes = self.parser.parse(raw)
 
+
             if minutes.strip() and minutes.strip() != "请查看会议纪要":
                 break
             if attempt < self.MAX_RETRY:

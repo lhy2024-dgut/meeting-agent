@@ -1,8 +1,14 @@
+import json
+import re
 import time
+from pathlib import Path
+
+import yaml
 
 from chains.minutes_chain import MinutesChain
 from chains.export_chain import ExportChain
 from engines.asr_engine import ASREngine, _get_audio_duration, _PARALLEL_MIN_SEC
+from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
 
@@ -159,6 +165,8 @@ class MeetingService:
             "minutes": cached.minutes_text or "",
             "action_items": cached.action_items_text or "",
             "resolutions": cached.resolutions_text or "",
+            "short_summary": cached.short_summary or "",
+            "project_name": cached.project_name or "",
             "meeting_id": cached.id,
             "title": cached.title,
             "output_path": output_path,
@@ -215,17 +223,26 @@ class MeetingService:
         if not (resolutions or "").strip():
             resolutions = "本次会议未明确决议。"
 
+        # Step 4.5: 摘要 + 项目名生成
+        if progress_callback:
+            progress_callback(72, "📝 生成摘要...")
+        short_summary, project_name = self._generate_summary(transcript, minutes)
+
         # Step 5: 持久化
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
         self.db.add_transcriptions_bulk(meeting_id, segments)
-        self.db.update_meeting_results(meeting_id, minutes, action_items, resolutions)
+        self.db.update_meeting_results(
+            meeting_id, minutes, action_items, resolutions,
+            short_summary=short_summary,
+            project_name=project_name,
+        )
 
         # Step 6: 向量索引 (RAG)
         if progress_callback:
             progress_callback(88, "🔍 索引到知识库...")
         try:
-            get_retriever().index_meeting(
+            get_retriever().rebuild_meeting_index(
                 meeting_id,
                 transcript=transcript,
                 minutes=minutes,
@@ -233,7 +250,7 @@ class MeetingService:
                 resolutions=resolutions,
             )
         except Exception as e:
-            logger.warning("RAG 索引失败（Embedding 模型不可用）: %s", e)
+            logger.warning("RAG 索引重建失败，已保留旧索引: %s", e)
 
         # Step 7: 导出
         if progress_callback:
@@ -257,6 +274,8 @@ class MeetingService:
             "minutes": minutes,
             "action_items": action_items,
             "resolutions": resolutions,
+            "short_summary": short_summary,
+            "project_name": project_name,
             "meeting_id": meeting_id,
             "title": title,
             "output_path": output_path,
@@ -267,6 +286,47 @@ class MeetingService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _generate_summary(transcript, minutes):
+        """调用 LLM 生成 short_summary 和 project_name。
+        失败时返回安全 fallback 值，不抛异常。
+        """
+        try:
+            template_path = (
+                Path(__file__).resolve().parent.parent
+                / "prompts" / "templates" / "auto_summary.yaml"
+            )
+            with open(template_path, "r", encoding="utf-8") as f:
+                template = yaml.safe_load(f)
+            system_prompt = template["system"].format(
+                transcript=(transcript or "")[:3000],
+                minutes=(minutes or "")[:1000],
+            )
+        except Exception as e:
+            logger.warning("加载 auto_summary 模板失败: %s", e)
+            return (minutes or "")[:200], "未分类"
+
+        try:
+            llm = get_llm(temperature=0.1)
+            response = llm.invoke(system_prompt)
+            text = response.content if hasattr(response, "content") else str(response)
+        except Exception as e:
+            logger.warning("摘要 LLM 调用失败: %s", e)
+            return (minutes or "")[:200], "未分类"
+
+        try:
+            # 移除可能的 ```json 包装
+            text = text.strip()
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+            data = json.loads(text)
+            project_name = str(data.get("project_name", "未分类"))[:20]
+            short_summary = str(data.get("short_summary", ""))[:200]
+            return short_summary, project_name
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            logger.warning("摘要 JSON 解析失败: %s, raw=%s", e, text[:100])
+            return (minutes or "")[:200], "未分类"
 
     @staticmethod
     def _estimate_speaker_count_heuristic(segments):
