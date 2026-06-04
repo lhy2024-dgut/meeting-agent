@@ -67,5 +67,5 @@ class MeetingChunk(Base):
     chunk_index = Column(Integer, nullable=False, default=0)
     chunk_text = Column(Text, nullable=False)
     content_hash = Column(String(64), nullable=False, default="")
-    embedding = Column(Vector)
+    embedding = Column(Vector(1024))
     created_at = Column(DateTime)

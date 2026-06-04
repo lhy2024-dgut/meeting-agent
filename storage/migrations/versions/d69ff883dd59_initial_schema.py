@@ -61,7 +61,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('meeting_id', sa.Integer(), nullable=False),
         sa.Column('chunk_text', sa.Text(), nullable=False),
-        sa.Column('embedding', Vector(), nullable=True),
+        sa.Column('embedding', Vector(1024), nullable=True),
         sa.ForeignKeyConstraint(['meeting_id'], ['meetings.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         if_not_exists=True,
