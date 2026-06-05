@@ -1,0 +1,250 @@
+{
+  "timestamp": "2026-06-02T20:44:36.548651",
+  "summary": {
+    "total_files": 24,
+    "avg_cer": 0.5189,
+    "avg_wer": 2.2627
+  },
+  "details": [
+    {
+      "meeting_id": "R8001_M8004",
+      "speaker": "R8001_M8004_N_SPK8013",
+      "cer": 0.4296,
+      "wer": 2.7148,
+      "gold_len": 4945,
+      "asr_len": 4490,
+      "audio_duration": 1551.8,
+      "process_time": 95.8
+    },
+    {
+      "meeting_id": "R8001_M8004",
+      "speaker": "R8001_M8004_N_SPK8014",
+      "cer": 0.3012,
+      "wer": 3.6235,
+      "gold_len": 3318,
+      "asr_len": 3258,
+      "audio_duration": 1551.8,
+      "process_time": 166.2
+    },
+    {
+      "meeting_id": "R8001_M8004",
+      "speaker": "R8001_M8004_N_SPK8015",
+      "cer": 0.4647,
+      "wer": 1.3961,
+      "gold_len": 2688,
+      "asr_len": 2316,
+      "audio_duration": 1551.8,
+      "process_time": 118.6
+    },
+    {
+      "meeting_id": "R8003_M8001",
+      "speaker": "R8003_M8001_N_SPK8001",
+      "cer": 1.4416,
+      "wer": 5.9691,
+      "gold_len": 2005,
+      "asr_len": 4339,
+      "audio_duration": 2067.7,
+      "process_time": 260.4
+    },
+    {
+      "meeting_id": "R8003_M8001",
+      "speaker": "R8003_M8001_N_SPK8002",
+      "cer": 1.5521,
+      "wer": 5.6379,
+      "gold_len": 2928,
+      "asr_len": 6540,
+      "audio_duration": 2067.7,
+      "process_time": 235.3
+    },
+    {
+      "meeting_id": "R8003_M8001",
+      "speaker": "R8003_M8001_N_SPK8003",
+      "cer": 0.6327,
+      "wer": 2.5193,
+      "gold_len": 3749,
+      "asr_len": 4619,
+      "audio_duration": 2067.7,
+      "process_time": 217.9
+    },
+    {
+      "meeting_id": "R8003_M8001",
+      "speaker": "R8003_M8001_N_SPK8004",
+      "cer": 0.3645,
+      "wer": 1.5676,
+      "gold_len": 3719,
+      "asr_len": 3556,
+      "audio_duration": 2067.7,
+      "process_time": 170.4
+    },
+    {
+      "meeting_id": "R8007_M8010",
+      "speaker": "R8007_M8010_N_SPK8050",
+      "cer": 0.6694,
+      "wer": 1.0,
+      "gold_len": 2792,
+      "asr_len": 1675,
+      "audio_duration": 1858.0,
+      "process_time": 109.5
+    },
+    {
+      "meeting_id": "R8007_M8010",
+      "speaker": "R8007_M8010_N_SPK8054",
+      "cer": 0.4053,
+      "wer": 2.7595,
+      "gold_len": 6476,
+      "asr_len": 5579,
+      "audio_duration": 1858.0,
+      "process_time": 148.0
+    },
+    {
+      "meeting_id": "R8007_M8010",
+      "speaker": "R8007_M8010_N_SPK8055",
+      "cer": 0.3118,
+      "wer": 1.6171,
+      "gold_len": 4286,
+      "asr_len": 3525,
+      "audio_duration": 1858.0,
+      "process_time": 97.3
+    },
+    {
+      "meeting_id": "R8007_M8010",
+      "speaker": "R8007_M8010_N_SPK8056",
+      "cer": 0.2469,
+      "wer": 1.9032,
+      "gold_len": 4651,
+      "asr_len": 4140,
+      "audio_duration": 1858.0,
+      "process_time": 97.0
+    },
+    {
+      "meeting_id": "R8007_M8011",
+      "speaker": "R8007_M8011_N_SPK8066",
+      "cer": 0.1967,
+      "wer": 2.2449,
+      "gold_len": 4130,
+      "asr_len": 3846,
+      "audio_duration": 1863.0,
+      "process_time": 98.2
+    },
+    {
+      "meeting_id": "R8007_M8011",
+      "speaker": "R8007_M8011_N_SPK8067",
+      "cer": 0.3957,
+      "wer": 1.7706,
+      "gold_len": 2653,
+      "asr_len": 2681,
+      "audio_duration": 1863.0,
+      "process_time": 172.6
+    },
+    {
+      "meeting_id": "R8007_M8011",
+      "speaker": "R8007_M8011_N_SPK8068",
+      "cer": 0.2538,
+      "wer": 2.209,
+      "gold_len": 4633,
+      "asr_len": 4061,
+      "audio_duration": 1863.0,
+      "process_time": 111.9
+    },
+    {
+      "meeting_id": "R8007_M8011",
+      "speaker": "R8007_M8011_N_SPK8069",
+      "cer": 0.5236,
+      "wer": 1.5274,
+      "gold_len": 2192,
+      "asr_len": 2200,
+      "audio_duration": 1863.0,
+      "process_time": 160.1
+    },
+    {
+      "meeting_id": "R8008_M8013",
+      "speaker": "R8008_M8013_N_SPK8047",
+      "cer": 0.3191,
+      "wer": 1.6389,
+      "gold_len": 3845,
+      "asr_len": 3551,
+      "audio_duration": 2239.5,
+      "process_time": 127.5
+    },
+    {
+      "meeting_id": "R8008_M8013",
+      "speaker": "R8008_M8013_N_SPK8048",
+      "cer": 0.6204,
+      "wer": 2.5021,
+      "gold_len": 4045,
+      "asr_len": 4411,
+      "audio_duration": 2239.5,
+      "process_time": 166.6
+    },
+    {
+      "meeting_id": "R8008_M8013",
+      "speaker": "R8008_M8013_N_SPK8049",
+      "cer": 0.4296,
+      "wer": 2.1369,
+      "gold_len": 3024,
+      "asr_len": 2978,
+      "audio_duration": 2239.5,
+      "process_time": 124.2
+    },
+    {
+      "meeting_id": "R8009_M8018",
+      "speaker": "R8009_M8018_N_SPK8021",
+      "cer": 0.4683,
+      "wer": 1.9359,
+      "gold_len": 5824,
+      "asr_len": 6024,
+      "audio_duration": 1654.5,
+      "process_time": 137.7
+    },
+    {
+      "meeting_id": "R8009_M8018",
+      "speaker": "R8009_M8018_N_SPK8022",
+      "cer": 0.3397,
+      "wer": 1.2,
+      "gold_len": 4384,
+      "asr_len": 3821,
+      "audio_duration": 1654.5,
+      "process_time": 117.5
+    },
+    {
+      "meeting_id": "R8009_M8019",
+      "speaker": "R8009_M8019_N_SPK8023",
+      "cer": 0.5102,
+      "wer": 1.0,
+      "gold_len": 6021,
+      "asr_len": 5161,
+      "audio_duration": 1974.0,
+      "process_time": 164.6
+    },
+    {
+      "meeting_id": "R8009_M8019",
+      "speaker": "R8009_M8019_N_SPK8024",
+      "cer": 0.3811,
+      "wer": 1.2189,
+      "gold_len": 4750,
+      "asr_len": 4094,
+      "audio_duration": 1973.8,
+      "process_time": 158.9
+    },
+    {
+      "meeting_id": "R8009_M8020",
+      "speaker": "R8009_M8020_N_SPK8025",
+      "cer": 0.5156,
+      "wer": 1.2102,
+      "gold_len": 5797,
+      "asr_len": 6085,
+      "audio_duration": 1910.4,
+      "process_time": 178.1
+    },
+    {
+      "meeting_id": "R8009_M8020",
+      "speaker": "R8009_M8020_N_SPK8026",
+      "cer": 0.6799,
+      "wer": 3.0027,
+      "gold_len": 5166,
+      "asr_len": 6613,
+      "audio_duration": 1910.4,
+      "process_time": 187.2
+    }
+  ]
+}
