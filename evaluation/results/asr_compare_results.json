@@ -1,0 +1,565 @@
+{
+  "timestamp": "2026-06-03T11:36:40.878803",
+  "whisper": {
+    "summary": {
+      "engine": "Faster-Whisper (base)",
+      "total_files": 24,
+      "avg_cer": 0.5018,
+      "avg_wer": 2.0747,
+      "total_process_time": 3471.4,
+      "total_audio_duration": 45606.3,
+      "rtf": 0.0761
+    },
+    "details": [
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8013",
+        "cer": 0.4176,
+        "wer": 2.6859,
+        "gold_len": 4945,
+        "asr_len": 4502,
+        "audio_duration": 1551.8,
+        "process_time": 79.3,
+        "segments_count": 737
+      },
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8014",
+        "cer": 0.2307,
+        "wer": 1.7412,
+        "gold_len": 3318,
+        "asr_len": 2876,
+        "audio_duration": 1551.8,
+        "process_time": 182.7,
+        "segments_count": 99
+      },
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8015",
+        "cer": 0.3278,
+        "wer": 1.1494,
+        "gold_len": 2688,
+        "asr_len": 2202,
+        "audio_duration": 1551.8,
+        "process_time": 99.1,
+        "segments_count": 176
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8001",
+        "cer": 1.1928,
+        "wer": 5.5567,
+        "gold_len": 2005,
+        "asr_len": 3894,
+        "audio_duration": 2067.7,
+        "process_time": 255.4,
+        "segments_count": 542
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8002",
+        "cer": 1.4359,
+        "wer": 5.3103,
+        "gold_len": 2928,
+        "asr_len": 6171,
+        "audio_duration": 2067.7,
+        "process_time": 208.9,
+        "segments_count": 922
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8003",
+        "cer": 0.4746,
+        "wer": 1.9282,
+        "gold_len": 3749,
+        "asr_len": 3690,
+        "audio_duration": 2067.7,
+        "process_time": 195.8,
+        "segments_count": 346
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8004",
+        "cer": 0.5469,
+        "wer": 2.7207,
+        "gold_len": 3719,
+        "asr_len": 4327,
+        "audio_duration": 2067.7,
+        "process_time": 209.7,
+        "segments_count": 602
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8050",
+        "cer": 0.6604,
+        "wer": 1.0,
+        "gold_len": 2792,
+        "asr_len": 1766,
+        "audio_duration": 1858.0,
+        "process_time": 139.9,
+        "segments_count": 277
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8054",
+        "cer": 0.4085,
+        "wer": 3.6908,
+        "gold_len": 6476,
+        "asr_len": 5814,
+        "audio_duration": 1858.0,
+        "process_time": 149.8,
+        "segments_count": 966
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8055",
+        "cer": 0.2917,
+        "wer": 1.487,
+        "gold_len": 4286,
+        "asr_len": 3596,
+        "audio_duration": 1858.0,
+        "process_time": 111.7,
+        "segments_count": 393
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8056",
+        "cer": 0.2469,
+        "wer": 1.9032,
+        "gold_len": 4651,
+        "asr_len": 4140,
+        "audio_duration": 1858.0,
+        "process_time": 97.3,
+        "segments_count": 575
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8066",
+        "cer": 0.1967,
+        "wer": 2.2449,
+        "gold_len": 4130,
+        "asr_len": 3846,
+        "audio_duration": 1863.0,
+        "process_time": 92.1,
+        "segments_count": 368
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8067",
+        "cer": 0.4283,
+        "wer": 1.0,
+        "gold_len": 2653,
+        "asr_len": 1754,
+        "audio_duration": 1863.0,
+        "process_time": 126.6,
+        "segments_count": 136
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8068",
+        "cer": 0.2529,
+        "wer": 2.1692,
+        "gold_len": 4633,
+        "asr_len": 4045,
+        "audio_duration": 1863.0,
+        "process_time": 100.3,
+        "segments_count": 432
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8069",
+        "cer": 0.5944,
+        "wer": 1.0,
+        "gold_len": 2192,
+        "asr_len": 1743,
+        "audio_duration": 1863.0,
+        "process_time": 120.0,
+        "segments_count": 187
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8047",
+        "cer": 0.483,
+        "wer": 2.0794,
+        "gold_len": 3845,
+        "asr_len": 3612,
+        "audio_duration": 2239.5,
+        "process_time": 122.2,
+        "segments_count": 464
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8048",
+        "cer": 0.3848,
+        "wer": 1.5941,
+        "gold_len": 4045,
+        "asr_len": 3846,
+        "audio_duration": 2239.5,
+        "process_time": 172.3,
+        "segments_count": 366
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8049",
+        "cer": 0.491,
+        "wer": 1.8797,
+        "gold_len": 3024,
+        "asr_len": 2909,
+        "audio_duration": 2239.5,
+        "process_time": 116.5,
+        "segments_count": 419
+      },
+      {
+        "meeting_id": "R8009_M8018",
+        "speaker": "R8009_M8018_N_SPK8021",
+        "cer": 0.4215,
+        "wer": 1.8308,
+        "gold_len": 5824,
+        "asr_len": 6228,
+        "audio_duration": 1654.5,
+        "process_time": 129.6,
+        "segments_count": 717
+      },
+      {
+        "meeting_id": "R8009_M8018",
+        "speaker": "R8009_M8018_N_SPK8022",
+        "cer": 0.4034,
+        "wer": 0.9964,
+        "gold_len": 4384,
+        "asr_len": 3742,
+        "audio_duration": 1654.5,
+        "process_time": 105.7,
+        "segments_count": 229
+      },
+      {
+        "meeting_id": "R8009_M8019",
+        "speaker": "R8009_M8019_N_SPK8023",
+        "cer": 0.3946,
+        "wer": 1.0,
+        "gold_len": 6021,
+        "asr_len": 4992,
+        "audio_duration": 1974.0,
+        "process_time": 158.2,
+        "segments_count": 87
+      },
+      {
+        "meeting_id": "R8009_M8019",
+        "speaker": "R8009_M8019_N_SPK8024",
+        "cer": 0.4282,
+        "wer": 1.2897,
+        "gold_len": 4750,
+        "asr_len": 4250,
+        "audio_duration": 1973.8,
+        "process_time": 144.3,
+        "segments_count": 594
+      },
+      {
+        "meeting_id": "R8009_M8020",
+        "speaker": "R8009_M8020_N_SPK8025",
+        "cer": 0.6425,
+        "wer": 1.2613,
+        "gold_len": 5797,
+        "asr_len": 6439,
+        "audio_duration": 1910.4,
+        "process_time": 180.3,
+        "segments_count": 631
+      },
+      {
+        "meeting_id": "R8009_M8020",
+        "speaker": "R8009_M8020_N_SPK8026",
+        "cer": 0.6885,
+        "wer": 2.274,
+        "gold_len": 5166,
+        "asr_len": 6317,
+        "audio_duration": 1910.4,
+        "process_time": 173.6,
+        "segments_count": 811
+      }
+    ]
+  },
+  "sensevoice": {
+    "summary": {
+      "engine": "SenseVoice-Small",
+      "total_files": 24,
+      "avg_cer": 0.9293,
+      "avg_wer": 1.0069,
+      "total_process_time": 171.1,
+      "total_audio_duration": 45606.3,
+      "rtf": 0.0038
+    },
+    "details": [
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8013",
+        "cer": 0.2936,
+        "wer": 0.9964,
+        "gold_len": 4945,
+        "asr_len": 5002,
+        "audio_duration": 1551.8,
+        "process_time": 6.2,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8014",
+        "cer": 0.8686,
+        "wer": 1.2353,
+        "gold_len": 3318,
+        "asr_len": 5806,
+        "audio_duration": 1551.8,
+        "process_time": 5.9,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8001_M8004",
+        "speaker": "R8001_M8004_N_SPK8015",
+        "cer": 0.9254,
+        "wer": 0.987,
+        "gold_len": 2688,
+        "asr_len": 4509,
+        "audio_duration": 1551.8,
+        "process_time": 6.0,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8001",
+        "cer": 2.9916,
+        "wer": 1.2887,
+        "gold_len": 2005,
+        "asr_len": 7536,
+        "audio_duration": 2067.7,
+        "process_time": 8.4,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8002",
+        "cer": 2.2711,
+        "wer": 0.9943,
+        "gold_len": 2928,
+        "asr_len": 8649,
+        "audio_duration": 2067.7,
+        "process_time": 7.7,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8003",
+        "cer": 1.2404,
+        "wer": 0.9945,
+        "gold_len": 3749,
+        "asr_len": 7636,
+        "audio_duration": 2067.7,
+        "process_time": 7.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8003_M8001",
+        "speaker": "R8003_M8001_N_SPK8004",
+        "cer": 1.3885,
+        "wer": 0.9775,
+        "gold_len": 3719,
+        "asr_len": 8058,
+        "audio_duration": 2067.7,
+        "process_time": 7.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8050",
+        "cer": 0.6001,
+        "wer": 0.9941,
+        "gold_len": 2792,
+        "asr_len": 3002,
+        "audio_duration": 1858.0,
+        "process_time": 6.9,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8054",
+        "cer": 0.2652,
+        "wer": 1.0,
+        "gold_len": 6476,
+        "asr_len": 6424,
+        "audio_duration": 1858.0,
+        "process_time": 6.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8055",
+        "cer": 0.281,
+        "wer": 0.974,
+        "gold_len": 4286,
+        "asr_len": 4643,
+        "audio_duration": 1858.0,
+        "process_time": 6.9,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8010",
+        "speaker": "R8007_M8010_N_SPK8056",
+        "cer": 0.1734,
+        "wer": 0.9774,
+        "gold_len": 4651,
+        "asr_len": 4513,
+        "audio_duration": 1858.0,
+        "process_time": 6.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8066",
+        "cer": 0.753,
+        "wer": 0.9694,
+        "gold_len": 4130,
+        "asr_len": 6732,
+        "audio_duration": 1863.0,
+        "process_time": 7.0,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8067",
+        "cer": 1.8273,
+        "wer": 0.9941,
+        "gold_len": 2653,
+        "asr_len": 6888,
+        "audio_duration": 1863.0,
+        "process_time": 6.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8068",
+        "cer": 0.5628,
+        "wer": 0.9801,
+        "gold_len": 4633,
+        "asr_len": 6464,
+        "audio_duration": 1863.0,
+        "process_time": 6.8,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8007_M8011",
+        "speaker": "R8007_M8011_N_SPK8069",
+        "cer": 2.4398,
+        "wer": 0.995,
+        "gold_len": 2192,
+        "asr_len": 6690,
+        "audio_duration": 1863.0,
+        "process_time": 7.0,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8047",
+        "cer": 0.4082,
+        "wer": 0.9286,
+        "gold_len": 3845,
+        "asr_len": 4818,
+        "audio_duration": 2239.5,
+        "process_time": 8.3,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8048",
+        "cer": 0.5535,
+        "wer": 0.954,
+        "gold_len": 4045,
+        "asr_len": 5737,
+        "audio_duration": 2239.5,
+        "process_time": 8.3,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8008_M8013",
+        "speaker": "R8008_M8013_N_SPK8049",
+        "cer": 0.5988,
+        "wer": 0.9668,
+        "gold_len": 3024,
+        "asr_len": 4083,
+        "audio_duration": 2239.5,
+        "process_time": 8.4,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8018",
+        "speaker": "R8009_M8018_N_SPK8021",
+        "cer": 0.5242,
+        "wer": 0.9949,
+        "gold_len": 5824,
+        "asr_len": 7519,
+        "audio_duration": 1654.5,
+        "process_time": 6.1,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8018",
+        "speaker": "R8009_M8018_N_SPK8022",
+        "cer": 0.6226,
+        "wer": 0.9964,
+        "gold_len": 4384,
+        "asr_len": 5883,
+        "audio_duration": 1654.5,
+        "process_time": 6.1,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8019",
+        "speaker": "R8009_M8019_N_SPK8023",
+        "cer": 0.5272,
+        "wer": 0.9899,
+        "gold_len": 6021,
+        "asr_len": 7388,
+        "audio_duration": 1974.0,
+        "process_time": 7.3,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8019",
+        "speaker": "R8009_M8019_N_SPK8024",
+        "cer": 0.6679,
+        "wer": 0.985,
+        "gold_len": 4750,
+        "asr_len": 6380,
+        "audio_duration": 1973.8,
+        "process_time": 7.4,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8020",
+        "speaker": "R8009_M8020_N_SPK8025",
+        "cer": 0.6797,
+        "wer": 1.0,
+        "gold_len": 5797,
+        "asr_len": 7828,
+        "audio_duration": 1910.4,
+        "process_time": 7.0,
+        "segments_count": 1
+      },
+      {
+        "meeting_id": "R8009_M8020",
+        "speaker": "R8009_M8020_N_SPK8026",
+        "cer": 0.8388,
+        "wer": 0.9918,
+        "gold_len": 5166,
+        "asr_len": 8187,
+        "audio_duration": 1910.4,
+        "process_time": 7.1,
+        "segments_count": 1
+      }
+    ]
+  },
+  "comparison": {
+    "cer_diff": -0.4275,
+    "wer_diff": 1.0678,
+    "rtf_diff": 0.0723,
+    "cer_winner": "✅ Whisper",
+    "wer_winner": "✅ SV",
+    "rtf_winner": "✅ SV"
+  }
+}
