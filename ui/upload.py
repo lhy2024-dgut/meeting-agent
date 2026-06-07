@@ -10,7 +10,8 @@ import config
 from db.repository import MeetingRepository
 from prompts.templates import PromptTemplateLoader
 from services.file_service import FileService
-from services.meeting_service import MeetingService
+from services.meeting_service import MeetingService, ASR_MODEL_WHISPER, ASR_MODEL_SENSEVOICE
+from services.terms_service import truncate_terms, _estimate_tokens
 from ui.components import error_card, progress_steps
 
 
@@ -117,6 +118,57 @@ def page_upload():
             if preview["description"]:
                 st.caption(f"ℹ️ {preview['description']}")
 
+        st.divider()
+
+        # ── ASR 模型选择 ──────────────────────────────────────────────────────
+        asr_model = st.radio(
+            "语音识别模型",
+            options=[ASR_MODEL_WHISPER, ASR_MODEL_SENSEVOICE],
+            index=0,
+            horizontal=True,
+            help=(
+                "**faster-whisper**：OpenAI Whisper 加速版，支持 initial_prompt 术语注入\n\n"
+                "**SenseVoiceSmall**：FunAudioLLM 开源模型，内置 VAD，支持 hotword 术语注入"
+            ),
+        )
+
+        # ── 术语词表输入 ──────────────────────────────────────────────────────
+        kept = []  # 默认为空，在 expander 内赋值
+        with st.expander("📚 自定义术语词表（可选）", expanded=False):
+            st.caption("每行一个术语，注入 ASR 提升专有名词识别率。也可粘贴 CSV（逗号或换行分隔）。")
+
+            if "terms_raw" not in st.session_state:
+                st.session_state.terms_raw = ""
+
+            terms_raw = st.text_area(
+                "术语列表",
+                value=st.session_state.terms_raw,
+                height=120,
+                placeholder="例：\n量子纠缠\nTransformer\n李明（项目负责人）",
+                label_visibility="collapsed",
+                key="terms_textarea",
+            )
+            st.session_state.terms_raw = terms_raw
+
+            # 解析并估算 token
+            raw_terms = [
+                t.strip()
+                for part in terms_raw.replace(",", "\n").replace("，", "\n").splitlines()
+                for t in [part.strip()] if t.strip()
+            ]
+            if raw_terms:
+                kept, truncated = truncate_terms(raw_terms)
+                total_tok = sum(_estimate_tokens(t) + 1 for t in kept)
+                if truncated:
+                    st.warning(
+                        f"⚠️ 词表超出 200 token 限制，已自动截断至前 {len(kept)} 条"
+                        f"（共 ~{total_tok} token）。超出部分不会注入 ASR。"
+                    )
+                else:
+                    st.caption(f"✓ {len(kept)} 条术语，约 {total_tok} token（上限 200）")
+            else:
+                kept = []
+
         with st.expander("▸ 高级选项", expanded=False):
             tf = st.file_uploader(
                 "自定义模板（可选）",
@@ -162,13 +214,17 @@ def page_upload():
     file_path = fs.prepare_audio_path(file_path, ext)
     meeting_dt = datetime.combine(meeting_date, meeting_time)
 
-    # 收集场景参数（"自定义模板"在后端等价于通用会议+自定义标题）
+    # 收集场景参数
     is_custom = selected_scene == "自定义模板"
     scene_to_use = PromptTemplateLoader.DEFAULT_SCENE if is_custom else selected_scene
     custom_headings = st.session_state.get("custom_headings") or None
 
+    # 收集术语词表（已在表单中完成截断，这里直接使用 kept）
+    terms_to_use = kept if kept else None
+
     # 进度 UI 区
     st.divider()
+    st.caption(f"🤖 ASR 模型：**{asr_model}**" + (f"  |  📚 术语词表：{len(terms_to_use)} 条" if terms_to_use else ""))
     status_text = st.empty()
     status_text.markdown("**⏳ 正在加载语音识别模型...**")
     progress_bar = st.progress(0)
@@ -207,6 +263,8 @@ def page_upload():
             progress_callback=on_progress,
             scene=scene_to_use,
             custom_headings=custom_headings,
+            asr_model=asr_model,
+            terms=terms_to_use,
         ):
             if event["type"] == "segment":
                 pct = event["progress"]["pct"]
