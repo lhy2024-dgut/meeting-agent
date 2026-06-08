@@ -470,11 +470,11 @@ def _run_asr_test(file_path: str, asr_model: str, terms: list | None,
 
     try:
         if asr_model == ASR_MODEL_SENSEVOICE:
-            from engines.sense_voice_engine import SenseVoiceEngine
-            engine = SenseVoiceEngine()
+            from engines.sense_voice_engine import get_sensevoice_engine
+            engine = get_sensevoice_engine()
         else:
-            from engines.asr_engine import ASREngine
-            engine = ASREngine()
+            from engines.asr_engine import get_asr_engine
+            engine = get_asr_engine()
 
         t0 = _time.time()
         if transcription_mode == "parallel":

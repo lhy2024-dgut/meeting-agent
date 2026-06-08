@@ -125,7 +125,11 @@ def _transcribe_chunk(model, chunk_path: str, start_offset: float,
 
 
 class SenseVoiceEngine:
-    """FunASR SenseVoiceSmall 引擎，接口与 ASREngine（faster-whisper）兼容"""
+    """FunASR SenseVoiceSmall 引擎，接口与 ASREngine（faster-whisper）兼容
+
+    直接转写（transcribe_iter）：整段音频送入模型，只有一个 FunASR 进度条。
+    并行转写（transcribe_parallel_iter）：ffmpeg 切块后逐块处理，进度更细。
+    """
 
     def __init__(self):
         self._model = None
@@ -136,36 +140,56 @@ class SenseVoiceEngine:
             self._model = _load_model()
         return self._model
 
-    # ── 内部：获取切块 ────────────────────────────────────────────────────────
-
-    def _get_chunks(self, audio_path: str):
-        """使用 ffmpeg 静音检测切块，返回 (chunks, tmpdir, duration_s)"""
-        from engines.asr_engine import _get_audio_duration, _split_audio_ffmpeg, _PARALLEL_MIN_SEC
-        duration_s = _get_audio_duration(audio_path) or _PARALLEL_MIN_SEC
-        chunks, tmpdir = _split_audio_ffmpeg(audio_path, duration_s)
-        return chunks, tmpdir, duration_s
-
     # ── 主接口 ────────────────────────────────────────────────────────────────
 
     def transcribe_iter(self, audio_path, progress_callback=None, terms=None):
-        """按 ffmpeg 切块顺序转写，逐段 yield (segment, total_duration)"""
+        """直接转写：整段音频送入 SenseVoice，不切块，只产生一个 FunASR 进度条。
+
+        时间戳粒度较粗（整段 start=0, end=duration），适合快速对比评测场景。
+        Yields: (segment_dict, total_duration)
+        """
+        from engines.asr_engine import _get_audio_duration, _PARALLEL_MIN_SEC
         hotword = _build_hotword(terms)
-        chunks, tmpdir, total_duration = self._get_chunks(audio_path)
-        n = len(chunks)
+        total_duration = _get_audio_duration(audio_path) or _PARALLEL_MIN_SEC
+
+        gen_kwargs = dict(
+            input=audio_path,
+            cache={},
+            language="zh",
+            use_itn=True,
+            batch_size_s=300,
+            merge_vad=True,
+            merge_length_s=30,
+        )
+        if hotword:
+            try:
+                res = self.model.generate(**gen_kwargs, hotword=hotword)
+            except TypeError:
+                res = self.model.generate(**gen_kwargs)
+        else:
+            res = self.model.generate(**gen_kwargs)
+
+        # 整段 → 合并所有结果为一个 segment（或按 FunASR VAD 分段）
         all_segments = []
-        try:
-            for i, chunk in enumerate(chunks):
-                segs = _transcribe_chunk(self.model, chunk["path"], chunk["start_s"], hotword)
-                all_segments.extend(segs)
-                if progress_callback:
-                    progress_callback(i + 1, n)
+        seg_id = 0
+        for item in (res or []):
+            text = _postprocess(item.get("text", ""))
+            if not text.strip():
+                continue
+            all_segments.append({
+                "id": seg_id,
+                "text": text,
+                "start": 0.0,
+                "end": total_duration,
+                "duration": total_duration,
+                "timestamp": time.time(),
+            })
+            seg_id += 1
 
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+        if progress_callback:
+            progress_callback(1, 1)
 
-        # 重新编号并 yield
-        for new_id, seg in enumerate(all_segments):
-            seg["id"] = new_id
+        for seg in all_segments:
             yield seg, total_duration
 
     def transcribe(self, audio_path, progress_callback=None, terms=None):
@@ -177,7 +201,10 @@ class SenseVoiceEngine:
         return segments, duration
 
     def transcribe_parallel_iter(self, audio_path, terms=None):
-        """切块转写，yield 进度事件流（与 ASREngine.transcribe_parallel_iter 接口一致）"""
+        """并行（切块）转写：ffmpeg 静音切块后逐块处理，时间戳更精确。
+
+        Yields progress events: chunk_done / complete
+        """
         from engines.asr_engine import _get_audio_duration, _split_audio_ffmpeg, _PARALLEL_MIN_SEC
         hotword = _build_hotword(terms)
         duration_s = _get_audio_duration(audio_path) or _PARALLEL_MIN_SEC
@@ -216,3 +243,16 @@ class SenseVoiceEngine:
     @staticmethod
     def classify_meeting_type(duration, num_speakers=1, noise_level=0.3):
         return SenseVoiceEngine.classify_duration(duration), "unknown"
+
+
+# ── 模块级单例（Fix 2：避免每次重复加载模型）───────────────────────────────────
+
+_sv_engine_instance: SenseVoiceEngine | None = None
+
+
+def get_sensevoice_engine() -> SenseVoiceEngine:
+    """返回 SenseVoiceEngine 单例，模型只加载一次"""
+    global _sv_engine_instance
+    if _sv_engine_instance is None:
+        _sv_engine_instance = SenseVoiceEngine()
+    return _sv_engine_instance

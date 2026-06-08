@@ -7,7 +7,7 @@ import yaml
 
 from chains.minutes_chain import MinutesChain
 from chains.export_chain import ExportChain
-from engines.asr_engine import ASREngine, _get_audio_duration, _PARALLEL_MIN_SEC
+from engines.asr_engine import ASREngine, get_asr_engine, _get_audio_duration, _PARALLEL_MIN_SEC
 from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
@@ -34,15 +34,15 @@ class MeetingService:
     @property
     def asr(self):
         if self._asr is None:
-            self._asr = ASREngine()
+            self._asr = get_asr_engine()   # 返回模块级单例，不重复加载模型
         return self._asr
 
     def _get_engine(self, asr_model: str):
-        """根据 asr_model 名称返回对应引擎实例"""
+        """根据 asr_model 名称返回对应引擎单例"""
         if asr_model == ASR_MODEL_SENSEVOICE:
             if self._sv_engine is None:
-                from engines.sense_voice_engine import SenseVoiceEngine
-                self._sv_engine = SenseVoiceEngine()
+                from engines.sense_voice_engine import get_sensevoice_engine
+                self._sv_engine = get_sensevoice_engine()  # 模块级单例
             return self._sv_engine
         return self.asr
 

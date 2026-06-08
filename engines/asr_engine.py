@@ -351,3 +351,16 @@ class ASREngine:
     @staticmethod
     def classify_meeting_type(duration, num_speakers, noise_level):
         return ASREngine.classify_duration(duration), "unknown"
+
+
+# ── 模块级单例（避免每次重复加载 WhisperModel）───────────────────────────────────
+
+_asr_engine_instance: ASREngine | None = None
+
+
+def get_asr_engine() -> ASREngine:
+    """返回 ASREngine 单例，WhisperModel 只加载一次"""
+    global _asr_engine_instance
+    if _asr_engine_instance is None:
+        _asr_engine_instance = ASREngine()
+    return _asr_engine_instance
