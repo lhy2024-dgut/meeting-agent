@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """上传页"""
 
+import difflib
+import html
+import re
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -159,6 +163,20 @@ def page_upload():
         )
         st.caption(f"ℹ️ {_CHUNK_HELP[chunk_strategy_label]}")
 
+        # ── 转写策略选择 ──────────────────────────────────────────────────────
+        transcription_mode = st.radio(
+            "转写策略",
+            options=["auto", "direct", "parallel"],
+            format_func=lambda m: {"auto": "自动（按时长）", "direct": "直接转写", "parallel": "并行转写"}[m],
+            index=0,
+            horizontal=True,
+            help=(
+                "**自动**：音频 <90s 直接转写，≥90s 自动切换并行\n\n"
+                "**直接转写**：单进程顺序转写，资源占用低\n\n"
+                "**并行转写**：ffmpeg 切块 + 多进程，长音频速度更快"
+            ),
+        )
+
         # ── 术语词表输入 ──────────────────────────────────────────────────────
         kept = []  # 默认为空，在 expander 内赋值
         with st.expander("📚 自定义术语词表（可选）", expanded=False):
@@ -196,6 +214,19 @@ def page_upload():
             else:
                 kept = []
 
+        # ── 测试功能：原始文本 & 错词率对比 ─────────────────────────────────
+        with st.expander("🧪 测试功能：转录错词率对比（仅供测试，后续将删除）", expanded=False):
+            st.warning(
+                "⚠️ **测试专用功能**：填入原始文本后，点击「测试转录」将只运行 ASR 并计算错词率，"
+                "**不会**生成会议纪要、不保存数据库。"
+            )
+            ref_text = st.text_area(
+                "原始转录文本（参考文本）",
+                height=120,
+                placeholder="请粘贴音频对应的准确文本，用于计算字符错误率（CER）……",
+                key="ref_text_input",
+            )
+
         with st.expander("▸ 高级选项", expanded=False):
             tf = st.file_uploader(
                 "自定义模板（可选）",
@@ -209,10 +240,11 @@ def page_upload():
                 st.session_state.template_path = tpl_path
                 st.caption(f"已加载模板：{tf.name}")
 
+        _ref_text = st.session_state.get("ref_text_input", "").strip()
         disabled = not uploaded or (
             selected_scene == _CUSTOM_SCENE and not st.session_state.custom_headings
         )
-        cols = st.columns([3, 1])
+        cols = st.columns([2, 2, 1])
         with cols[0]:
             clicked = st.button(
                 "🚀 开始生成会议纪要",
@@ -222,12 +254,24 @@ def page_upload():
                 key="btn_generate",
             )
         with cols[1]:
-            st.caption("⏱ 预计约 2 分钟")
+            clicked_test = st.button(
+                "🧪 测试转录",
+                type="secondary",
+                width='stretch',
+                disabled=not uploaded,
+                key="btn_test_asr",
+                help="仅运行 ASR，与原始文本对比错词率，不生成纪要",
+            )
+        with cols[2]:
+            if _ref_text:
+                st.caption("✓ 有参考文本")
+            else:
+                st.caption("⏱ 预计约 2 分钟")
 
-    if not clicked:
+    if not clicked and not clicked_test:
         return
 
-    # ---------- 处理流程 ----------
+    # ---------- 公共准备 ----------
     reset_result()
     fs = FileService()
     db = MeetingRepository()
@@ -248,6 +292,11 @@ def page_upload():
 
     # 收集术语词表（已在表单中完成截断，这里直接使用 kept）
     terms_to_use = kept if kept else None
+
+    # ── 测试模式：仅 ASR + CER 对比 ─────────────────────────────────────────
+    if clicked_test:
+        _run_asr_test(file_path, asr_model, terms_to_use, transcription_mode)
+        return
 
     # 进度 UI 区
     st.divider()
@@ -293,6 +342,7 @@ def page_upload():
             asr_model=asr_model,
             terms=terms_to_use,
             chunk_strategy=chunk_strategy_label,
+            transcription_mode=transcription_mode,
         ):
             if event["type"] == "segment":
                 pct = event["progress"]["pct"]
@@ -338,3 +388,130 @@ def page_upload():
     st.session_state.output_path = result.get("output_path")
     st.session_state.page = "result"
     st.rerun()
+
+
+# ── 测试功能：ASR 转录 + CER 对比（后续将删除）────────────────────────────────
+
+def _normalize_for_cer(text: str) -> str:
+    """去标点空格，保留汉字+字母数字（小写），用于 CER 计算"""
+    return re.sub(r"[^一-鿿a-z0-9]", "", text.lower())
+
+
+def _calculate_cer(reference: str, hypothesis: str) -> float:
+    ref = _normalize_for_cer(reference)
+    hyp = _normalize_for_cer(hypothesis)
+    if not ref:
+        return 0.0
+    # Levenshtein 编辑距离（字符级）
+    n, m = len(ref), len(hyp)
+    dp = list(range(m + 1))
+    for i in range(1, n + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, m + 1):
+            prev, dp[j] = dp[j], min(
+                prev + (0 if ref[i - 1] == hyp[j - 1] else 1),
+                dp[j] + 1, dp[j - 1] + 1,
+            )
+    return dp[m] / n
+
+
+def _build_diff_html(reference: str, hypothesis: str) -> str:
+    """对比 hypothesis 与 reference，将 hypothesis 中不匹配的字符标红，返回 HTML"""
+    ref_chars = list(reference)
+    hyp_chars = list(hypothesis)
+    matcher = difflib.SequenceMatcher(None, ref_chars, hyp_chars, autojunk=False)
+    parts = []
+    for op, _, _, j1, j2 in matcher.get_opcodes():
+        chunk = html.escape("".join(hyp_chars[j1:j2]))
+        if op == "equal":
+            parts.append(chunk)
+        else:
+            parts.append(f'<span style="color:#EF4444;background:#FEF2F2">{chunk}</span>')
+    return "".join(parts)
+
+
+def _run_asr_test(file_path: str, asr_model: str, terms: list | None,
+                  transcription_mode: str):
+    """测试专用：仅运行 ASR，展示转录结果并（若有参考文本）计算 CER"""
+    ref_text = st.session_state.get("ref_text_input", "").strip()
+
+    st.divider()
+    st.markdown(
+        "### 🧪 转录测试结果\n"
+        '<span style="color:#6B7280;font-size:12px">⚠️ 测试功能，仅供转录评估，不生成会议纪要，不保存数据库</span>',
+        unsafe_allow_html=True,
+    )
+
+    status = st.empty()
+    status.markdown("**⏳ 正在加载模型并转写...**")
+    prog = st.progress(0)
+
+    try:
+        if asr_model == ASR_MODEL_SENSEVOICE:
+            from engines.sense_voice_engine import SenseVoiceEngine
+            engine = SenseVoiceEngine()
+        else:
+            from engines.asr_engine import ASREngine
+            engine = ASREngine()
+
+        t0 = _time.time()
+        if transcription_mode == "parallel":
+            segments = []
+            for event in engine.transcribe_parallel_iter(file_path, terms=terms):
+                if event["type"] == "chunk_done":
+                    prog.progress(min(int(event["completed"] / max(event["total"], 1) * 90), 90))
+                elif event["type"] == "complete":
+                    segments = event["segments"]
+        else:
+            segments = []
+            for seg, _ in engine.transcribe_iter(file_path, terms=terms):
+                segments.append(seg)
+                prog.progress(min(len(segments) * 5, 90))
+
+        asr_time = _time.time() - t0
+        hyp_text = " ".join(seg.get("text", "") for seg in segments)
+
+    except Exception as e:
+        status.error(f"转写失败：{e}")
+        prog.empty()
+        return
+
+    prog.progress(100)
+
+    # ── 展示 ──────────────────────────────────────────────────────────────────
+    if ref_text:
+        cer = _calculate_cer(ref_text, hyp_text)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("字符错误率（CER）", f"{cer * 100:.2f}%")
+        with c2:
+            st.metric("转写耗时", f"{asr_time:.1f}s")
+
+        status.success(f"✅ 转写完成  |  CER {cer*100:.2f}%  |  耗时 {asr_time:.1f}s")
+
+        col_ref, col_hyp = st.columns(2, gap="medium")
+        with col_ref:
+            st.markdown("**📄 原始文本（参考）**")
+            st.markdown(
+                f'<div style="background:#F8FAFC;padding:12px;border-radius:6px;'
+                f'font-size:14px;line-height:1.8;border:1px solid #E2E8F0;'
+                f'max-height:400px;overflow-y:auto">'
+                f'{html.escape(ref_text)}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_hyp:
+            st.markdown(f"**🎤 转录结果（{asr_model}）**")
+            diff_html = _build_diff_html(ref_text, hyp_text)
+            st.markdown(
+                f'<div style="background:#F8FAFC;padding:12px;border-radius:6px;'
+                f'font-size:14px;line-height:1.8;border:1px solid #E2E8F0;'
+                f'max-height:400px;overflow-y:auto">'
+                f'{diff_html}</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption("🔴 红色文字 = 与参考文本不一致")
+    else:
+        status.success(f"✅ 转写完成  |  耗时 {asr_time:.1f}s（未提供参考文本，不计算 CER）")
+        st.metric("转写耗时", f"{asr_time:.1f}s")
+        st.markdown("**🎤 转录结果**")
+        st.text_area("转录全文", value=hyp_text, height=200, disabled=True, key="test_hyp_out")

@@ -92,7 +92,10 @@ def page_result():
         env_label = config.ENV_LABELS.get(data.get("environment", ""), "")
         dur_label = config.DURATION_LABELS.get(data.get("duration_category", ""), "")
 
-        cols = st.columns(4)
+        asr_time = data.get("asr_time")
+        asr_time_str = f"{asr_time:.1f}s" if asr_time else "—"
+
+        cols = st.columns(5)
         with cols[0]:
             with st.container(border=True):
                 st.markdown(
@@ -124,6 +127,14 @@ def page_result():
                     f'<div style="text-align:center;font-size:22px;font-weight:700;color:#F29E4C">'
                     f"{action_count}</div>"
                     f'<div style="text-align:center;font-size:12px;color:#94A3B8">待办事项</div>',
+                    unsafe_allow_html=True,
+                )
+        with cols[4]:
+            with st.container(border=True):
+                st.markdown(
+                    f'<div style="text-align:center;font-size:22px;font-weight:700;color:#3B82F6">'
+                    f"🎤 {asr_time_str}</div>"
+                    f'<div style="text-align:center;font-size:12px;color:#94A3B8">转写耗时</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -299,6 +310,20 @@ def render_chat(data):
             f"{msg['content']}</div>",
             unsafe_allow_html=True,
         )
+        # RAG 召回展示（仅助手消息）
+        rag_hits = msg.get("rag_results", [])
+        if rag_hits:
+            with st.expander(f"📚 RAG 召回参考（{len(rag_hits)} 条）", expanded=False):
+                for i, r in enumerate(rag_hits, 1):
+                    score_pct = f"{r.get('score', 0) * 100:.1f}%"
+                    title = r.get("meeting_title", "—")
+                    label = r.get("chunk_type_label", "—")
+                    st.markdown(
+                        f'<div style="font-size:12px;color:#6B7280;margin-bottom:2px">'
+                        f"**#{i}** [{title}｜{label}]　相似度 **{score_pct}**</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(r.get("text", "")[:200])
 
     # 输入
     with st.form("result_chat_form", clear_on_submit=True):
@@ -329,9 +354,15 @@ def render_chat(data):
             with st.spinner("思考中..."):
                 try:
                     resp = agent.chat(prompt)
+                    rag_results = agent.get_latest_rag_results()
                 except Exception:
                     resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
-            st.session_state.result_messages.append({"role": "assistant", "content": resp})
+                    rag_results = []
+            st.session_state.result_messages.append({
+                "role": "assistant",
+                "content": resp,
+                "rag_results": rag_results,
+            })
             st.rerun()
 
 

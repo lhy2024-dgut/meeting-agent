@@ -99,13 +99,25 @@ class MeetingService:
         asr_model=ASR_MODEL_WHISPER,
         terms=None,
         chunk_strategy=None,
+        transcription_mode="auto",
     ):
-        """流式处理：边转写边返回结果；长音频自动切换并行模式"""
+        """流式处理：边转写边返回结果
+
+        transcription_mode:
+          "auto"     — 按时长自动选择（≥90s 并行，否则直接）
+          "direct"   — 强制直接转写
+          "parallel" — 强制并行转写
+        """
         engine = self._get_engine(asr_model)
         asr_start = time.time()
 
         duration_s = _get_audio_duration(file_path)
-        use_parallel = duration_s >= _PARALLEL_MIN_SEC
+        if transcription_mode == "parallel":
+            use_parallel = True
+        elif transcription_mode == "direct":
+            use_parallel = False
+        else:
+            use_parallel = duration_s >= _PARALLEL_MIN_SEC
 
         if use_parallel:
             segments = []
