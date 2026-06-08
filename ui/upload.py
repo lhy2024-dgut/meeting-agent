@@ -11,6 +11,7 @@ from db.repository import MeetingRepository
 from prompts.templates import PromptTemplateLoader
 from services.file_service import FileService
 from services.meeting_service import MeetingService, ASR_MODEL_WHISPER, ASR_MODEL_SENSEVOICE
+from config import CHUNK_STRATEGY_FIXED, CHUNK_STRATEGY_SEGMENT, CHUNK_STRATEGY_SEMANTIC
 from services.terms_service import truncate_terms, _estimate_tokens
 from ui.components import error_card, progress_steps
 
@@ -131,6 +132,32 @@ def page_upload():
                 "**SenseVoiceSmall**：FunAudioLLM 开源模型，内置 VAD，支持 hotword 术语注入"
             ),
         )
+
+        # ── Chunk 切分策略选择 ────────────────────────────────────────────────
+        _CHUNK_OPTIONS = {
+            CHUNK_STRATEGY_FIXED:    "固定 512 字",
+            CHUNK_STRATEGY_SEGMENT:  "按句子合并 300 字",
+            CHUNK_STRATEGY_SEMANTIC: "语义切分",
+        }
+        _CHUNK_HELP = {
+            CHUNK_STRATEGY_FIXED:
+                "按字符数递归切分，512 字一块，64 字重叠。速度最快，适合大多数场景。",
+            CHUNK_STRATEGY_SEGMENT:
+                "将 ASR 输出的 segment 逐句合并至约 300 字，天然语义完整，自带时间戳。"
+                "需配合所选 ASR 模型使用（faster-whisper / SenseVoiceSmall 各有独立实现）。",
+            CHUNK_STRATEGY_SEMANTIC:
+                "用 bge-m3 计算相邻句子余弦相似度，在话题切换处（相似度断崖）切块。"
+                "chunk 语义最连贯，但需额外 embedding 计算，速度稍慢。",
+        }
+        chunk_strategy_label = st.radio(
+            "RAG 切分策略",
+            options=list(_CHUNK_OPTIONS.keys()),
+            format_func=lambda k: _CHUNK_OPTIONS[k],
+            index=0,
+            horizontal=True,
+            key="chunk_strategy_selector",
+        )
+        st.caption(f"ℹ️ {_CHUNK_HELP[chunk_strategy_label]}")
 
         # ── 术语词表输入 ──────────────────────────────────────────────────────
         kept = []  # 默认为空，在 expander 内赋值
@@ -265,6 +292,7 @@ def page_upload():
             custom_headings=custom_headings,
             asr_model=asr_model,
             terms=terms_to_use,
+            chunk_strategy=chunk_strategy_label,
         ):
             if event["type"] == "segment":
                 pct = event["progress"]["pct"]

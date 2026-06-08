@@ -63,6 +63,7 @@ class MeetingService:
         custom_headings=None,
         asr_model=ASR_MODEL_WHISPER,
         terms=None,
+        chunk_strategy=None,
     ):
         """批量处理：ASR → 分类 → LLM → 持久化 → RAG → 导出"""
         cached = self.db.get_meeting_by_hash(file_hash)
@@ -81,6 +82,7 @@ class MeetingService:
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
             scene=scene, custom_headings=custom_headings, terms=terms,
+            chunk_strategy=chunk_strategy, asr_model=asr_model,
         )
 
     def process_stream(
@@ -96,6 +98,7 @@ class MeetingService:
         custom_headings=None,
         asr_model=ASR_MODEL_WHISPER,
         terms=None,
+        chunk_strategy=None,
     ):
         """流式处理：边转写边返回结果；长音频自动切换并行模式"""
         engine = self._get_engine(asr_model)
@@ -143,6 +146,7 @@ class MeetingService:
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
             scene=scene, custom_headings=custom_headings, terms=terms,
+            chunk_strategy=chunk_strategy, asr_model=asr_model,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -208,6 +212,8 @@ class MeetingService:
         scene="通用会议",
         custom_headings=None,
         terms=None,
+        chunk_strategy=None,
+        asr_model=None,
     ):
         """Steps 3-7: 分类 → LLM 提取 → 持久化 → RAG 索引 → 导出"""
         # Step 3: 分类
@@ -276,6 +282,9 @@ class MeetingService:
                 minutes=minutes,
                 action_items=action_items,
                 resolutions=resolutions,
+                chunk_strategy=chunk_strategy,
+                segments=segments,
+                asr_model=asr_model or ASR_MODEL_WHISPER,
             )
         except Exception as e:
             logger.warning("RAG 索引重建失败，已保留旧索引: %s", e)

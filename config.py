@@ -44,6 +44,11 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 
+# Chunk 切分策略: "fixed_512" | "segment_300" | "semantic"
+CHUNK_STRATEGY_FIXED    = "fixed_512"    # 现有固定 512 字切分
+CHUNK_STRATEGY_SEGMENT  = "segment_300"  # ASR segments 合并至 300 字
+CHUNK_STRATEGY_SEMANTIC = "semantic"     # 基于 embedding 语义相似度切分
+
 # RAG 检索模式: "vector" | "bm25" | "hybrid"
 SEARCH_MODE = os.getenv("SEARCH_MODE", "hybrid")
 # Reranker 开关

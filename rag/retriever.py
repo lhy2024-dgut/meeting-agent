@@ -150,25 +150,62 @@ class Retriever:
     # ── Public: 覆盖式索引重建 ──
 
     def rebuild_meeting_index(
-        self, meeting_id, transcript="", minutes="", action_items="", resolutions=""
+        self, meeting_id, transcript="", minutes="", action_items="", resolutions="",
+        chunk_strategy=None, segments=None, asr_model=None,
     ):
         """覆盖式重建会议索引：DELETE 旧 chunks → 生成新 chunks → 事务写入。
 
-        相同 meeting_id 多次调用不会产生重复数据。
-        同时更新向量索引和 BM25 索引。
+        Args:
+            chunk_strategy: "fixed_512" | "segment_300" | "semantic"（None 取 config 默认）
+            segments:       ASR 原始 segment 列表，segment_300 策略时对 transcript 使用
+            asr_model:      "faster-whisper" | "SenseVoiceSmall"，决定使用哪套 segment 分块器
         """
-        sources = [
-            ("transcript", transcript),
-            ("minutes", minutes),
-            ("action_item", action_items),
-            ("resolution", resolutions),
-        ]
+        from config import (CHUNK_STRATEGY_FIXED, CHUNK_STRATEGY_SEGMENT,
+                            CHUNK_STRATEGY_SEMANTIC)
+        from services.meeting_service import ASR_MODEL_SENSEVOICE
 
+        strategy = chunk_strategy or CHUNK_STRATEGY_FIXED
+
+        # ── 构造各 chunk_type 对应的文本 chunks ──────────────────────────────
         structured_chunks = []
-        for chunk_type, source_text in sources:
+
+        # transcript 单独处理（segment_300 策略用 segments）
+        if transcript and transcript.strip():
+            if strategy == CHUNK_STRATEGY_SEGMENT and segments:
+                raw_chunks = self._segment_split(segments, asr_model)
+            elif strategy == CHUNK_STRATEGY_SEMANTIC:
+                splitter = self._get_semantic_splitter()
+                raw_chunks = splitter.split_text(transcript)
+            else:
+                raw_chunks = self.splitter.split_text(transcript)
+
+            for i, chunk_text in enumerate(raw_chunks):
+                structured_chunks.append({
+                    "chunk_type": "transcript",
+                    "chunk_index": i,
+                    "chunk_text": chunk_text,
+                    "content_hash": self._hash_text(chunk_text),
+                })
+
+        # minutes / action_items / resolutions：segment_300 用较小固定切分，semantic 走语义切分
+        other_sources = [
+            ("minutes",     minutes),
+            ("action_item", action_items),
+            ("resolution",  resolutions),
+        ]
+        for chunk_type, source_text in other_sources:
             if not source_text or not source_text.strip():
                 continue
-            raw_chunks = self.splitter.split_text(source_text)
+            if strategy == CHUNK_STRATEGY_SEMANTIC:
+                splitter = self._get_semantic_splitter()
+                raw_chunks = splitter.split_text(source_text)
+            elif strategy == CHUNK_STRATEGY_SEGMENT:
+                # 非 transcript 无 segments，改用 300 字固定切分
+                from rag.text_splitter import SimpleTextSplitter
+                raw_chunks = SimpleTextSplitter(chunk_size=300, chunk_overlap=32).split_text(source_text)
+            else:
+                raw_chunks = self.splitter.split_text(source_text)
+
             for i, chunk_text in enumerate(raw_chunks):
                 structured_chunks.append({
                     "chunk_type": chunk_type,
@@ -176,6 +213,9 @@ class Retriever:
                     "chunk_text": chunk_text,
                     "content_hash": self._hash_text(chunk_text),
                 })
+
+        logger.info("会议 %s 使用切分策略 [%s]，生成 %d 个 chunk（含去重前）",
+                    meeting_id, strategy, len(structured_chunks))
 
         if not structured_chunks:
             # 覆盖式语义：无有效文本时应清空旧索引
@@ -515,6 +555,24 @@ class Retriever:
         return "\n\n".join(lines)
 
     # ── Private ──
+
+    def _segment_split(self, segments: list, asr_model: str | None) -> list[str]:
+        """根据 asr_model 选择对应的 segment 分块器"""
+        from services.meeting_service import ASR_MODEL_SENSEVOICE
+        from rag.text_splitter import WhisperSegmentSplitter, SenseVoiceSegmentSplitter
+
+        if asr_model == ASR_MODEL_SENSEVOICE:
+            return SenseVoiceSegmentSplitter(target_chars=300).split_segments(segments)
+        return WhisperSegmentSplitter(target_chars=300).split_segments(segments)
+
+    _semantic_splitter = None
+
+    def _get_semantic_splitter(self):
+        """懒加载语义切分器（复用项目已有的 embedding 实例）"""
+        if self._semantic_splitter is None:
+            from rag.text_splitter import SemanticTextSplitter
+            self._semantic_splitter = SemanticTextSplitter(self.embeddings)
+        return self._semantic_splitter
 
     def _get_meeting_titles(self, meeting_ids: list) -> dict:
         """批量查询 meeting_id → title"""
