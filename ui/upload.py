@@ -39,6 +39,29 @@ def page_upload():
         key="upload_main",
     )
 
+    # ── 文件一旦上传，立即保存到磁盘并记入 session_state ──────────────────
+    # 这样后续 rerun（如用户在 expander 内输入文本）不会因 uploaded 变 None 而
+    # 导致按钮误判为 disabled 或处理流中出现 NoneType 错误。
+    if uploaded is not None:
+        _saved_name = st.session_state.get("_saved_file_name")
+        if _saved_name != uploaded.name:
+            _fs_early = FileService()
+            _ext_early = Path(uploaded.name).suffix.lower()
+            _saved_path, _saved_hash = _fs_early.save_uploaded(
+                uploaded,
+                "video" if _ext_early in config.ALLOWED_VIDEO_EXTENSIONS else "audio",
+            )
+            st.session_state["_saved_file_path"] = _saved_path
+            st.session_state["_saved_file_hash"] = _saved_hash
+            st.session_state["_saved_file_ext"] = _ext_early
+            st.session_state["_saved_file_name"] = uploaded.name
+    else:
+        # 用户清除了文件 → 同步清除 session_state 里的缓存路径
+        for _k in ["_saved_file_path", "_saved_file_hash", "_saved_file_ext", "_saved_file_name"]:
+            st.session_state.pop(_k, None)
+
+    _has_file = st.session_state.get("_saved_file_path") is not None
+
     if uploaded:
         st.audio(uploaded)
         st.markdown('<div style="padding:0.5rem"></div>', unsafe_allow_html=True)
@@ -47,7 +70,7 @@ def page_upload():
     with st.container(border=True):
         title = st.text_input(
             "会议标题",
-            value=uploaded.name.rsplit(".", 1)[0] if uploaded else "",
+            value=st.session_state.get("_saved_file_name", "").rsplit(".", 1)[0],
         )
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -241,7 +264,7 @@ def page_upload():
                 st.caption(f"已加载模板：{tf.name}")
 
         _ref_text = st.session_state.get("ref_text_input", "").strip()
-        disabled = not uploaded or (
+        disabled = not _has_file or (
             selected_scene == _CUSTOM_SCENE and not st.session_state.custom_headings
         )
         cols = st.columns([2, 2, 1])
@@ -258,7 +281,7 @@ def page_upload():
                 "🧪 测试转录",
                 type="secondary",
                 width='stretch',
-                disabled=not uploaded,
+                disabled=not _has_file,
                 key="btn_test_asr",
                 help="仅运行 ASR，与原始文本对比错词率，不生成纪要",
             )
@@ -277,11 +300,10 @@ def page_upload():
     db = MeetingRepository()
     svc = MeetingService(db)
 
-    ext = Path(uploaded.name).suffix.lower()
-    file_path, file_hash = fs.save_uploaded(
-        uploaded,
-        "video" if ext in config.ALLOWED_VIDEO_EXTENSIONS else "audio",
-    )
+    # 文件路径从 session_state 读取（已在上传时保存，不依赖 uploaded 对象是否仍有效）
+    file_path = st.session_state["_saved_file_path"]
+    file_hash = st.session_state["_saved_file_hash"]
+    ext = st.session_state["_saved_file_ext"]
     file_path = fs.prepare_audio_path(file_path, ext)
     meeting_dt = datetime.combine(meeting_date, meeting_time)
 
