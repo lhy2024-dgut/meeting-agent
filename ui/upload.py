@@ -19,6 +19,11 @@ def reset_result():
 
 
 def page_upload():
+    # ===== 前置处理：CSV 导入的词表填入文本框（必须在 widget 渲染前执行）=====
+    if "pending_csv_terms" in st.session_state:
+        st.session_state.terms_textarea = st.session_state.pending_csv_terms
+        del st.session_state.pending_csv_terms
+
     st.header("上传新会议")
 
     # 上传区
@@ -50,7 +55,65 @@ def page_upload():
         with c3:
             output_format = st.selectbox("导出格式", ["docx", "md", "pdf"], index=0)
 
-        with st.expander("▸ 高级选项", expanded=False):
+        has_terms = bool(st.session_state.get("terms_textarea", ""))
+        with st.expander("▸ 高级选项", expanded=has_terms):
+            # 术语词表输入
+            st.markdown(
+                '<div style="font-size:14px;font-weight:600;color:#1E293B;margin-bottom:4px">'
+                "📖 术语词表</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("每行一个词条，填入专有名词可提升 ASR 识别准确率")
+
+            terms_text = st.text_area(
+                "词表输入",
+                placeholder="分布式系统实验室\n张伟\nProject-X\nDataFlow\n...",
+                key="terms_textarea",
+                label_visibility="collapsed",
+                height=120,
+            )
+
+            # Token 估算警告（紧跟在词表输入框下方，用户在面板内即可看到）
+            if terms_text.strip():
+                chinese = sum(1 for c in terms_text if '一' <= c <= '鿿')
+                other = len(terms_text) - chinese
+                estimated_tokens = int(chinese * 2.0 + other * 0.5)
+                if estimated_tokens > 200:
+                    st.warning(
+                        f"⚠️ 词表约 {estimated_tokens} token，已超过 200 token 限制，"
+                        "超出部分将在识别时自动截断"
+                    )
+                elif estimated_tokens > 50:
+                    st.caption(f"💡 词表共估算约 {estimated_tokens} token（上限 200 token）")
+
+            # CSV 导入（按钮触发，直接填入文本框）
+            csv_file = st.file_uploader(
+                "从 CSV 导入词表",
+                type=["csv"],
+                key="terms_csv",
+                label_visibility="collapsed",
+            )
+            if csv_file:
+                c_csv1, c_csv2 = st.columns([3, 1])
+                with c_csv1:
+                    st.caption(f"已选择：{csv_file.name}")
+                with c_csv2:
+                    if st.button("📥 导入并覆盖词表", key="btn_import_csv"):
+                        try:
+                            content = csv_file.getvalue().decode("utf-8", errors="ignore")
+                            lines = [ln.strip() for ln in content.replace("\r\n", "\n").split("\n") if ln.strip()]
+                            new_terms = []
+                            for line in lines:
+                                new_terms.extend([t.strip() for t in line.split(",") if t.strip()])
+                            if new_terms:
+                                st.session_state.pending_csv_terms = "\n".join(new_terms)
+                                st.rerun()
+                            else:
+                                st.warning("CSV 中未识别到有效词条")
+                        except Exception as e:
+                            st.warning(f"CSV 解析失败：{e}")
+
+            st.divider()
             tf = st.file_uploader(
                 "自定义模板（可选）",
                 type=["docx", "md", "pdf"],
@@ -117,6 +180,10 @@ def page_upload():
 
     transcript_display = st.empty()
     try:
+        # 提取词表（文本框内容即为全部词表，CSV 导入已填入文本框）
+        terms_raw = st.session_state.get("terms_textarea", "")
+        terms_list = [t.strip() for t in terms_raw.strip().split("\n") if t.strip()]
+
         result = None
         for event in svc.process_stream(
             file_path,
@@ -125,6 +192,7 @@ def page_upload():
             meeting_dt,
             output_format=output_format,
             template_path=st.session_state.get("template_path"),
+            terms=terms_list if terms_list else None,
             progress_callback=on_progress,
         ):
             if event["type"] == "segment":

@@ -23,10 +23,10 @@ def _get_audio_info(audio_path):
                 audio_path,
             ],
             capture_output=True,
-            text=True,
+            text=False,       # 二进制模式，避免 GBK 解码错误
             timeout=30,
         )
-        info = json.loads(result.stdout)
+        info = json.loads(result.stdout.decode("utf-8", errors="replace"))
 
         duration_sec = float(info.get("format", {}).get("duration", 0))
 
@@ -49,10 +49,10 @@ def _get_audio_info(audio_path):
                         f"amovie={audio_path},ebur128=metadata=1",
                     ],
                     capture_output=True,
-                    text=True,
+                    text=False,       # 二进制模式，避免 GBK 解码错误
                     timeout=30,
                 )
-                loud_info = json.loads(loud_result.stdout)
+                loud_info = json.loads(loud_result.stdout.decode("utf-8", errors="replace"))
                 frames = loud_info.get("frames", [])
                 if frames:
                     i_values = [
@@ -73,6 +73,31 @@ def _get_audio_info(audio_path):
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
         logger.warning("ffprobe 获取音频信息失败: %s", e)
         return 0, 0.3
+
+
+# initial_prompt 最大 token 数（超出则截断）
+_INITIAL_PROMPT_MAX_TOKENS = 200
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗略估算 token 数：中文约 2 token/字，英文/数字约 0.5 token/字符"""
+    chinese = sum(1 for c in text if '一' <= c <= '鿿')
+    other = len(text) - chinese
+    return int(chinese * 2.0 + other * 0.5)
+
+
+def _build_initial_prompt(terms: list[str]) -> str:
+    """将词表拼接为 initial_prompt 字符串，超限时从尾部截断"""
+    if not terms:
+        return ""
+    text = " ".join(terms)
+    if _estimate_tokens(text) <= _INITIAL_PROMPT_MAX_TOKENS:
+        return text
+    # 超限：从尾部逐个移除词条，直到 token 数达标
+    trimmed = terms[:]
+    while trimmed and _estimate_tokens(" ".join(trimmed)) > _INITIAL_PROMPT_MAX_TOKENS:
+        trimmed.pop()
+    return " ".join(trimmed)
 
 
 class ASREngine:
@@ -104,7 +129,7 @@ class ASREngine:
             "timestamp": time.time(),
         }
 
-    def transcribe_iter(self, audio_path, progress_callback=None):
+    def transcribe_iter(self, audio_path, progress_callback=None, initial_prompt=None):
         duration_sec, noise_level = _get_audio_info(audio_path)
         beam_size = self._get_beam_size(duration_sec)
 
@@ -114,6 +139,7 @@ class ASREngine:
             beam_size=beam_size,
             vad_filter=False,
             condition_on_previous_text=True,
+            initial_prompt=initial_prompt,
         )
 
         total_est = int(info.duration / 5) + 1
@@ -123,10 +149,10 @@ class ASREngine:
                 progress_callback(idx + 1, total_est)
             yield item, info.duration
 
-    def transcribe(self, audio_path, progress_callback=None):
+    def transcribe(self, audio_path, progress_callback=None, initial_prompt=None):
         segments = []
         duration = 0.0
-        for item, dur in self.transcribe_iter(audio_path, progress_callback):
+        for item, dur in self.transcribe_iter(audio_path, progress_callback, initial_prompt=initial_prompt):
             segments.append(item)
             duration = dur
         return segments, duration

@@ -8,8 +8,15 @@ import streamlit as st
 
 import config
 from agents.chat_agent import ChatAgent
+from chains.minutes_chain import MinutesChain
+from chains.export_chain import ExportChain, list_templates
 from db.repository import MeetingRepository
+from engines.asr_engine import ASREngine, _build_initial_prompt
+from services.terms_loader import load_terms, save_terms
 from ui.components import empty_state, suggestion_pills
+from engines.llm import get_llm
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from rag.retriever import get_retriever
 
 
 def page_result():
@@ -53,7 +60,7 @@ def page_result():
         return
 
     # ---- 顶部操作栏 ----
-    c1, c2, c3 = st.columns([0.8, 3, 1])
+    c1, c2, c3, c4 = st.columns([0.6, 2.6, 1.2, 1.2])
     with c1:
         if st.button("← 返回", key="back_home", type="tertiary", width='stretch'):
             st.session_state.page = "home"
@@ -73,12 +80,34 @@ def page_result():
             p = Path(output_path)
             with open(p, "rb") as f:
                 st.download_button(
-                    label=f"📥 导出 · {p.suffix.lstrip('.')}",
+                    label=f"📥导出 · {p.suffix.lstrip('.')}",
                     data=f,
                     file_name=f"meeting_{data.get('meeting_id', 'minutes')}{p.suffix}",
                     mime="application/octet-stream",
                     width='stretch',
                 )
+        elif data.get("meeting_id") and data.get("minutes", "").strip():
+            # 历史查看模式：临时生成导出文件
+            hist_fmt = st.selectbox("格式", ["docx", "md", "pdf"], key="hist_fmt", label_visibility="collapsed")
+            if st.button("📥 导出", key="btn_hist_export", width='stretch'):
+                try:
+                    ec = ExportChain()
+                    output_data = {
+                        "meeting_id": data.get("meeting_id"),
+                        "title": data.get("title", "会议纪要"),
+                        "date": data.get("date", ""),
+                        "minutes": data.get("minutes", ""),
+                        "action_items": data.get("action_items", ""),
+                        "resolutions": data.get("resolutions", ""),
+                    }
+                    out_path = ec.run(output_data, output_format=hist_fmt)
+                    st.session_state.output_path = out_path
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"导出失败：{e}")
+    with c4:
+        if st.button("🎨 预览样式", key="btn_preview_style", width='stretch'):
+            _show_template_preview()
 
     st.divider()
 
@@ -128,6 +157,68 @@ def page_result():
                 )
 
     st.markdown('<div style="padding:0.5rem"></div>', unsafe_allow_html=True)
+
+    # ---- 术语词表（可编辑 + 重新生成） ----
+    mid = data.get("meeting_id")
+    if mid:
+        with st.expander("📖 术语词表（编辑后可重新生成纪要）", expanded=False):
+            current_terms = load_terms(mid)
+            terms_text = "\n".join(current_terms) if current_terms else ""
+            new_terms_text = st.text_area(
+                "每行一个词条",
+                value=terms_text,
+                key="result_terms_edit",
+                height=100,
+                label_visibility="collapsed",
+                placeholder="分布式系统实验室\n张伟\nProject-X\n...",
+            )
+
+            col_save, col_regen = st.columns([1, 2])
+            with col_save:
+                if st.button("💾 保存词表", key="btn_save_terms"):
+                    parsed = [t.strip() for t in new_terms_text.strip().split("\n") if t.strip()]
+                    save_terms(mid, parsed)
+                    st.success("词表已保存")
+                    st.rerun()
+            with col_regen:
+                if st.button(
+                    "🔄 保存并重新生成纪要（ASR + LLM）",
+                    key="btn_regenerate",
+                    type="primary" if current_terms else "secondary",
+                ):
+                    parsed = [t.strip() for t in new_terms_text.strip().split("\n") if t.strip()]
+                    save_terms(mid, parsed)
+                    meeting = MeetingRepository().get_meeting_by_id(mid)
+                    if not meeting or not meeting.audio_path:
+                        st.error("找不到原始音频文件，无法重新生成")
+                    else:
+                        with st.spinner("🎤 语音识别中..."):
+                            asr = ASREngine()
+                            prompt = _build_initial_prompt(parsed) if parsed else None
+                            segments, duration = asr.transcribe(meeting.audio_path, initial_prompt=prompt)
+                            transcript = " ".join(s.get("text", "") for s in segments)
+                        with st.spinner("🤖 生成会议纪要中..."):
+                            chain = MinutesChain()
+                            date_str = (
+                                meeting.created_at.strftime("%Y-%m-%d %H:%M")
+                                if meeting.created_at else ""
+                            )
+                            action_items, resolutions, minutes = chain.run(
+                                transcript, title=meeting.title, date=date_str
+                            )
+                        # 更新数据库
+                        db = MeetingRepository()
+                        db.update_meeting_results(mid, minutes, action_items, resolutions)
+                        db.add_transcriptions_bulk(mid, segments)
+                        # 更新 session_state
+                        data["minutes"] = minutes
+                        data["action_items"] = action_items
+                        data["resolutions"] = resolutions
+                        data["transcript"] = transcript
+                        data["segments"] = segments
+                        st.session_state.data = data
+                        st.success("✅ 重新生成完成")
+                        st.rerun()
 
     # ---- 双栏：待办 + 决议 ----
     col_left, col_right = st.columns(2, gap="large")
@@ -183,10 +274,7 @@ def page_result():
         )
         minutes_text = data.get("minutes") or ""
         if minutes_text.strip() and minutes_text.strip() != "请查看会议纪要":
-            st.markdown(
-                f'<div class="minutes-paper">{_md_to_html(minutes_text)}</div>',
-                unsafe_allow_html=True,
-            )
+            _render_collapsible_minutes(minutes_text)
         else:
             st.info("纪要内容为空，请检查音频质量或重试。")
 
@@ -225,8 +313,48 @@ def page_result():
     render_chat(data)
 
 
+def _stateless_chat(history, meeting_data, new_message):
+    """无状态问答：直接用历史消息 + 新问题调 LLM，不依赖 session_state 中的 Agent 实例"""
+    # RAG 检索（跨会议知识库）
+    try:
+        rag_context = get_retriever().build_context(
+            new_message,
+            top_k=5,
+            exclude_meeting_id=meeting_data.get("meeting_id"),
+        )
+    except Exception:
+        rag_context = ""
+
+    ctx = meeting_data
+    system_text = (
+        f"你正在讨论一场会议，以下为会议相关信息：\n\n"
+        f"会议转录摘要：{ctx.get('transcript', '')[:6000]}\n"
+        f"会议纪要：{ctx.get('minutes', '')[:2000]}\n"
+        f"待办事项：{ctx.get('action_items', '')[:1000]}\n"
+        f"会议决议：{ctx.get('resolutions', '')[:1000]}\n\n"
+        f"## 知识库检索结果（来自历史会议）\n"
+        f"{rag_context or '（暂无历史会议相关知识）'}\n\n"
+        f"请基于以上所有信息回答用户问题。优先使用当前会议信息；"
+        f"若问题涉及历史会议内容或需要跨会议对比，则使用知识库检索结果。"
+        f"要求：准确、简洁、不编造内容。"
+    )
+
+    # 构建消息：system prompt + 历史滑窗（最近 10 轮 = 20 条）+ 新问题
+    llm_messages = [SystemMessage(content=system_text)]
+    for m in history[-20:]:
+        if m["role"] == "user":
+            llm_messages.append(HumanMessage(content=m["content"]))
+        else:
+            llm_messages.append(AIMessage(content=m["content"]))
+    llm_messages.append(HumanMessage(content=new_message))
+
+    llm = get_llm(temperature=0.7)
+    response = llm.invoke(llm_messages)
+    return response.content
+
+
 def render_chat(data):
-    """结果页底部会议问答 — 含 LangGraph Memory 轮次显示"""
+    """结果页底部会议问答 — 无状态调用，不依赖 session_state 中的 Agent 实例"""
     # 标题行 + 轮次指示
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -236,42 +364,25 @@ def render_chat(data):
             unsafe_allow_html=True,
         )
     with c2:
-        try:
-            agent_check = st.session_state.get("result_agent")
-            if agent_check:
-                stats = agent_check.get_memory_stats()
-                round_label = f"第 {stats['round_count']}/{stats['max_rounds']} 轮"
-                if stats["is_full"]:
-                    round_label += " ⚠️"
-                st.markdown(
-                    f'<span style="font-size:13px;color:#64748B">{round_label}</span>',
-                    unsafe_allow_html=True,
-                )
-        except Exception:
-            pass
+        msgs = st.session_state.get("result_messages", [])
+        user_rounds = sum(1 for m in msgs if m["role"] == "user")
+        is_full = user_rounds >= 10
+        round_label = f"第 {user_rounds}/10 轮"
+        if is_full:
+            round_label += " ⚠️"
+        st.markdown(
+            f'<span style="font-size:13px;color:#64748B">{round_label}</span>',
+            unsafe_allow_html=True,
+        )
 
-    try:
-        mid = data.get("meeting_id")
-        if st.session_state.get("result_agent_meeting_id") != mid:
-            agent = ChatAgent()
-            agent.set_meeting_context(
-                data.get("transcript", ""),
-                data.get("minutes", ""),
-                data.get("action_items", ""),
-                data.get("resolutions", ""),
-                meeting_id=mid,
-            )
-            st.session_state.result_agent = agent
-            st.session_state.result_agent_meeting_id = mid
-            st.session_state.result_messages = []
-        agent: ChatAgent = st.session_state.result_agent
-    except Exception:
-        st.info("问答服务暂不可用")
-        return
+    mid = data.get("meeting_id")
+    if st.session_state.get("result_messages_meeting_id") != mid:
+        st.session_state.result_messages = []
+        st.session_state.result_messages_meeting_id = mid
 
     # 超出窗口提示
-    stats = agent.get_memory_stats()
-    if stats["trimmed"]:
+    msgs = st.session_state.get("result_messages", [])
+    if len(msgs) > 20:
         st.caption("💡 对话已超出 10 轮上限，已自动裁剪最早对话")
 
     # 建议问题
@@ -321,14 +432,78 @@ def render_chat(data):
             st.session_state.result_messages.append({"role": "user", "content": prompt})
             with st.spinner("思考中..."):
                 try:
-                    resp = agent.chat(prompt)
+                    resp = _stateless_chat(
+                        st.session_state.result_messages[:-1],
+                        data,
+                        prompt,
+                    )
                 except Exception:
                     resp = "抱歉，LLM 服务暂不可用，请检查 Ollama。"
             st.session_state.result_messages.append({"role": "assistant", "content": resp})
             st.rerun()
 
 
+# ---- 模板预览 ----
+
+def _show_template_preview():
+    """弹出模板预览对话框"""
+    templates = list_templates()
+    if not templates:
+        st.info("暂无可用模板")
+        return
+
+    st.markdown(
+        '<div style="font-size:18px;font-weight:700;color:#1E293B;margin-bottom:1rem">'
+        "🎨 模板预览</div>",
+        unsafe_allow_html=True,
+    )
+
+    tabs = st.tabs([t["label"] for t in templates])
+    for tab, tmpl in zip(tabs, templates):
+        with tab:
+            if tmpl["preview_path"] and Path(tmpl["preview_path"]).exists():
+                st.image(tmpl["preview_path"], use_container_width=True)
+            else:
+                st.info("暂无预览图")
+
+            sup = []
+            if tmpl["has_docx"]:
+                sup.append("Word (.docx)")
+            if tmpl["has_pdf"]:
+                sup.append("PDF")
+            st.caption(f"支持格式：{' / '.join(sup)}")
+
+
 # ---- 辅助函数 ----
+
+_EXPAND_KEY = "minutes_expanded"
+
+
+def _render_collapsible_minutes(raw_md: str):
+    """可折叠的纪要正文：默认显示前 800 字 + 展开全文按钮"""
+    max_preview = 800
+    show_full = st.session_state.get(_EXPAND_KEY, False)
+
+    if len(raw_md) > max_preview and not show_full:
+        preview = raw_md[:max_preview] + "\n\n> *全文较长，点击下方按钮查看完整内容*"
+        st.markdown(
+            f'<div class="minutes-paper">{_md_to_html(preview)}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="minutes-paper">{_md_to_html(raw_md)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if len(raw_md) > max_preview:
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c2:
+            label = "📖 收起" if show_full else "📖 展开全文"
+            if st.button(label, key="btn_toggle_minutes", type="tertiary", use_container_width=True):
+                st.session_state[_EXPAND_KEY] = not show_full
+                st.rerun()
+
 
 def _render_todos(action_text: str):
     lines = action_text.strip().split("\n")
