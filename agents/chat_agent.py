@@ -45,6 +45,7 @@ class ChatAgent:
         self._latest_rag_results = []
         self._trimmed = False
         self._round_count = 0
+        self._cross_meeting = False
 
         # Build graph: single node that builds context + calls LLM
         builder = StateGraph(ChatState)
@@ -56,9 +57,25 @@ class ChatAgent:
     # ── Public API ──
 
     def set_meeting_context(
-        self, transcript="", minutes="", action_items="", resolutions="", meeting_id=None
+        self, transcript="", minutes="", action_items="", resolutions="",
+        meeting_id=None, cross_meeting=False,
     ):
-        """注入会议上下文；切换会议时自动生成新 thread_id，Memory 完全隔离"""
+        """注入会议上下文；切换会议时自动生成新 thread_id，Memory 完全隔离。
+        cross_meeting=True 时不注入具体会议内容，RAG 搜索所有会议。
+        """
+        self._cross_meeting = cross_meeting
+        if cross_meeting:
+            self.meeting_context = {
+                "transcript": "", "minutes": "", "action_items": "",
+                "resolutions": "", "meeting_id": None,
+            }
+            self._thread_id = f"cross_{uuid.uuid4().hex[:8]}"
+            self._trimmed = False
+            self._round_count = 0
+            self._latest_rag_context = ""
+            self._latest_rag_results = []
+            return
+
         transcript = transcript or ""
         minutes = minutes or ""
         action_items = action_items or ""
@@ -91,20 +108,21 @@ class ChatAgent:
         """一问一答；每次自动走 MemorySaver 记录对话历史"""
         try:
             retriever = get_retriever()
-            results = retriever.search(
-                user_message,
-                top_k=5,
-                exclude_meeting_id=self.meeting_context.get("meeting_id"),
-            )
+            if self._cross_meeting:
+                results = retriever.search(user_message, top_k=5)
+            else:
+                results = retriever.search(
+                    user_message,
+                    top_k=5,
+                    meeting_id=self.meeting_context.get("meeting_id"),
+                )
             self._latest_rag_results = retriever.enrich_results(results)
-            rag_context = retriever.build_context(
-                results=results,
-            )
+            rag_context = retriever.build_context(results=results)
         except Exception as e:
             logger.warning("RAG 检索失败: %s", e)
             rag_context = ""
             self._latest_rag_results = []
-        self._latest_rag_context = rag_context or "（暂无历史会议相关知识）"
+        self._latest_rag_context = rag_context or "（暂无相关知识库内容）"
 
         app = self._graph.compile(checkpointer=self._checkpointer)
         result = app.invoke(
@@ -158,22 +176,32 @@ class ChatAgent:
 
         # Build fresh system prompt (includes latest RAG context)
         ctx = self.meeting_context
-        system_text = (
-            f"你正在讨论一场会议，以下为会议相关信息：\n\n"
-            f"会议转录摘要：{ctx.get('transcript', '')}\n"
-            f"会议纪要：{ctx.get('minutes', '')}\n"
-            f"待办事项：{ctx.get('action_items', '')}\n"
-            f"会议决议：{ctx.get('resolutions', '')}\n\n"
-            f"## 历史会议检索结果（来自其他会议的知识库）\n"
-            f"{self._latest_rag_context}\n\n"
-            f"回答规则（按优先级）：\n"
-            f"1. 优先依据当前会议内容回答用户问题。\n"
-            f"2. 若问题涉及历史背景、跨会议对比、之前的决议或项目延续信息，"
-            f'可参考"历史会议检索结果"。引用历史信息时，尽量说明来源会议。\n'
-            f"3. 若历史检索结果中没有足够依据，请明确告知"
-            f'“未在历史会议中找到相关信息”，不要编造。\n'
-            f"4. 回答应准确、简洁。"
-        )
+        if self._cross_meeting:
+            system_text = (
+                "你是一个会议助手，负责从历史会议知识库中检索并回答问题。\n\n"
+                "## 知识库召回结果\n"
+                f"{self._latest_rag_context}\n\n"
+                "回答规则：\n"
+                "1. 根据知识库召回内容回答，明确说明信息来源于哪场会议。\n"
+                "2. 跨会议对比时，分别引用各会议内容。\n"
+                "3. 若知识库中没有相关信息，请明确告知，不要编造。\n"
+                "4. 回答应准确、简洁。"
+            )
+        else:
+            system_text = (
+                f"你正在讨论一场会议，以下为会议相关信息：\n\n"
+                f"会议转录摘要：{ctx.get('transcript', '')}\n"
+                f"会议纪要：{ctx.get('minutes', '')}\n"
+                f"待办事项：{ctx.get('action_items', '')}\n"
+                f"会议决议：{ctx.get('resolutions', '')}\n\n"
+                f"## 知识库召回 Top-5\n"
+                f"{self._latest_rag_context}\n\n"
+                f"回答规则（按优先级）：\n"
+                f"1. 优先依据当前会议内容回答用户问题。\n"
+                f"2. 若当前会议内容不足，可参考知识库召回的相关片段，引用时注明来源会议。\n"
+                f"3. 若知识库中没有足够依据，请明确告知，不要编造。\n"
+                f"4. 回答应准确、简洁。"
+            )
 
         # Separate system from conversation messages
         non_system = [m for m in all_msgs if not isinstance(m, SystemMessage)]

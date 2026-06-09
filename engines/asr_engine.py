@@ -46,6 +46,36 @@ _MIN_SILENCE_MS    = 500   # detect silence gaps of at least this length
 _SILENCE_THRESH_DB = -40   # dBFS threshold for silence detection
 _MAX_WORKERS       = 4     # cap parallelism regardless of CPU count
 
+# ── Hallucination detection ──────────────────────────────────────────────────
+# Whisper echoes initial_prompt phrases during silence, and loops single tokens
+# when condition_on_previous_text=True causes runaway self-conditioning.
+
+_HALLUCINATION_PHRASES = [
+    "请使用简体中文输出",
+    "以下是普通话会议录音",
+    "本次会议涉及以下专有名词",
+    "字幕由",
+    "感谢收看",
+    "请订阅",
+]
+
+
+def _is_segment_hallucination(text: str) -> bool:
+    """Return True if a segment matches a known Whisper hallucination pattern."""
+    t = text.strip()
+    if not t:
+        return True
+    for phrase in _HALLUCINATION_PHRASES:
+        if phrase in t:
+            return True
+    # Repetition loop: any 1–4 char unit repeated 5+ times consecutively
+    clean = re.sub(r'[\s,，。！？、；：""\'\'「」【】]', '', t)
+    if len(clean) >= 5:
+        for unit_len in range(1, 5):
+            if re.search(r'(.{' + str(unit_len) + r'})\1{4,}', clean):
+                return True
+    return False
+
 
 def _detect_silence_ffmpeg(audio_path: str, min_silence_ms: int, thresh_db: int) -> list:
     """Return list of (start_s, end_s) silence intervals via ffmpeg silencedetect."""
@@ -131,9 +161,12 @@ def _transcribe_chunk_worker(args: tuple) -> dict:
         )
         segments = []
         for seg in segments_gen:
+            text = seg.text.strip()
+            if _is_segment_hallucination(text):
+                continue
             segments.append({
                 "id":        seg.id,
-                "text":      seg.text.strip(),
+                "text":      text,
                 "start":     seg.start + start_offset_s,
                 "end":       seg.end   + start_offset_s,
                 "duration":  seg.end - seg.start,
@@ -269,14 +302,16 @@ class ASREngine:
             audio_path,
             language=config.WHISPER_LANGUAGE,
             beam_size=beam_size,
-            vad_filter=False,
-            condition_on_previous_text=True,
+            vad_filter=True,
+            condition_on_previous_text=False,
             initial_prompt=prompt,
         )
 
         total_est = int(info.duration / 5) + 1
         for idx, seg in enumerate(segments_raw):
             item = self._build_segment(idx, seg)
+            if _is_segment_hallucination(item["text"]):
+                continue
             if progress_callback:
                 progress_callback(idx + 1, total_est)
             yield item, info.duration

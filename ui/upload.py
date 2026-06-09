@@ -243,12 +243,41 @@ def page_upload():
                 "⚠️ **测试专用功能**：填入原始文本后，点击「测试转录」将只运行 ASR 并计算错词率，"
                 "**不会**生成会议纪要、不保存数据库。"
             )
-            ref_text = st.text_area(
-                "原始转录文本（参考文本）",
-                height=120,
-                placeholder="请粘贴音频对应的准确文本，用于计算字符错误率（CER）……",
-                key="ref_text_input",
+            ref_mode = st.radio(
+                "参考文本来源",
+                ["手动输入", "上传 TextGrid 文件"],
+                horizontal=True,
+                key="ref_mode_selector",
             )
+            if ref_mode == "手动输入":
+                st.text_area(
+                    "原始转录文本（参考文本）",
+                    height=120,
+                    placeholder="请粘贴音频对应的准确文本，用于计算字符错误率（CER）……",
+                    key="ref_text_input",
+                )
+            else:
+                uploaded_tg = st.file_uploader(
+                    "TextGrid 文件",
+                    type=["TextGrid"],
+                    key="ref_textgrid_upload",
+                    label_visibility="collapsed",
+                )
+                if uploaded_tg is not None:
+                    _tg_content = uploaded_tg.read().decode("utf-8", errors="replace")
+                    _parsed_tg = _parse_textgrid(_tg_content)
+                    st.session_state["_tg_ref_text"] = _parsed_tg
+                    st.caption(f"✓ 已解析 **{uploaded_tg.name}**，共 {len(_parsed_tg)} 字符")
+                    st.text_area(
+                        "解析结果预览",
+                        value=_parsed_tg[:400] + ("…" if len(_parsed_tg) > 400 else ""),
+                        height=80,
+                        disabled=True,
+                        key="tg_preview",
+                    )
+                else:
+                    st.session_state.pop("_tg_ref_text", None)
+                    st.caption("请上传 .TextGrid 文件，将自动解析所有标注文本作为参考文本")
 
         with st.expander("▸ 高级选项", expanded=False):
             tf = st.file_uploader(
@@ -263,7 +292,11 @@ def page_upload():
                 st.session_state.template_path = tpl_path
                 st.caption(f"已加载模板：{tf.name}")
 
-        _ref_text = st.session_state.get("ref_text_input", "").strip()
+        _ref_mode = st.session_state.get("ref_mode_selector", "手动输入")
+        if _ref_mode == "手动输入":
+            _ref_text = st.session_state.get("ref_text_input", "").strip()
+        else:
+            _ref_text = st.session_state.get("_tg_ref_text", "")
         disabled = not _has_file or (
             selected_scene == _CUSTOM_SCENE and not st.session_state.custom_headings
         )
@@ -317,7 +350,12 @@ def page_upload():
 
     # ── 测试模式：仅 ASR + CER 对比 ─────────────────────────────────────────
     if clicked_test:
-        _run_asr_test(file_path, asr_model, terms_to_use, transcription_mode)
+        _ref_mode = st.session_state.get("ref_mode_selector", "手动输入")
+        if _ref_mode == "手动输入":
+            _test_ref_text = st.session_state.get("ref_text_input", "").strip()
+        else:
+            _test_ref_text = st.session_state.get("_tg_ref_text", "")
+        _run_asr_test(file_path, asr_model, terms_to_use, transcription_mode, _test_ref_text)
         return
 
     # 进度 UI 区
@@ -452,10 +490,15 @@ def _build_diff_html(reference: str, hypothesis: str) -> str:
     return "".join(parts)
 
 
+def _parse_textgrid(content: str) -> str:
+    """从 Praat TextGrid 文件内容中按顺序提取所有 interval 的 text，拼接为完整参考文本"""
+    texts = re.findall(r'text\s*=\s*"([^"]*)"', content)
+    return "".join(t for t in texts if t.strip())
+
+
 def _run_asr_test(file_path: str, asr_model: str, terms: list | None,
-                  transcription_mode: str):
+                  transcription_mode: str, ref_text: str = ""):
     """测试专用：仅运行 ASR，展示转录结果并（若有参考文本）计算 CER"""
-    ref_text = st.session_state.get("ref_text_input", "").strip()
 
     st.divider()
     st.markdown(

@@ -84,7 +84,7 @@ def _transcribe_chunk(model, chunk_path: str, start_offset: float,
         cache={},
         language="zh",
         use_itn=True,
-        batch_size_s=300,
+        batch_size_s=60,   # 与最大 chunk 时长匹配，避免 OOM
     )
     if hotword:
         try:
@@ -142,24 +142,50 @@ class SenseVoiceEngine:
 
     # ── 主接口 ────────────────────────────────────────────────────────────────
 
-    def transcribe_iter(self, audio_path, progress_callback=None, terms=None):
-        """直接转写：整段音频送入 SenseVoice，不切块，只产生一个 FunASR 进度条。
+    # 超过此时长则切块顺序处理，避免整段送入 FunASR 导致 OOM
+    _DIRECT_MAX_SEC = 120
 
-        时间戳粒度较粗（整段 start=0, end=duration），适合快速对比评测场景。
+    def transcribe_iter(self, audio_path, progress_callback=None, terms=None):
+        """直接转写：短音频整段送入 SenseVoice；长音频顺序切块处理以避免 OOM。
+
         Yields: (segment_dict, total_duration)
         """
-        from engines.asr_engine import _get_audio_duration, _PARALLEL_MIN_SEC
+        from engines.asr_engine import _get_audio_duration, _split_audio_ffmpeg, _PARALLEL_MIN_SEC
         hotword = _build_hotword(terms)
         total_duration = _get_audio_duration(audio_path) or _PARALLEL_MIN_SEC
 
+        if total_duration > self._DIRECT_MAX_SEC:
+            # 长音频：顺序切块，避免整段送入时的 OOM
+            logger.info(
+                "音频时长 %.1fs > %ds，SenseVoice 改用顺序切块转写",
+                total_duration, self._DIRECT_MAX_SEC,
+            )
+            chunks, tmpdir = _split_audio_ffmpeg(audio_path, total_duration)
+            seg_id = 0
+            try:
+                for chunk in chunks:
+                    segs = _transcribe_chunk(
+                        self.model, chunk["path"], chunk["start_s"], hotword
+                    )
+                    if progress_callback:
+                        progress_callback(int(chunk["end_s"]), int(total_duration))
+                    for seg in segs:
+                        seg["id"] = seg_id
+                        seg_id += 1
+                        yield seg, total_duration
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            return
+
+        # 短音频：整段送入
         gen_kwargs = dict(
             input=audio_path,
             cache={},
             language="zh",
             use_itn=True,
-            batch_size_s=300,
+            batch_size_s=60,
             merge_vad=True,
-            merge_length_s=30,
+            merge_length_s=15,
         )
         if hotword:
             try:
@@ -169,28 +195,23 @@ class SenseVoiceEngine:
         else:
             res = self.model.generate(**gen_kwargs)
 
-        # 整段 → 合并所有结果为一个 segment（或按 FunASR VAD 分段）
-        all_segments = []
         seg_id = 0
         for item in (res or []):
             text = _postprocess(item.get("text", ""))
             if not text.strip():
                 continue
-            all_segments.append({
+            yield {
                 "id": seg_id,
                 "text": text,
                 "start": 0.0,
                 "end": total_duration,
                 "duration": total_duration,
                 "timestamp": time.time(),
-            })
+            }, total_duration
             seg_id += 1
 
         if progress_callback:
             progress_callback(1, 1)
-
-        for seg in all_segments:
-            yield seg, total_duration
 
     def transcribe(self, audio_path, progress_callback=None, terms=None):
         """同步转写，返回 (segments, duration)"""

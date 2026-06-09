@@ -347,11 +347,17 @@ class Retriever:
             exclude_meeting_id=exclude_meeting_id, chunk_type=chunk_type,
         )
 
-        # 按模式分发
+        # 按模式分发；BM25 依赖 rank_bm25，未安装时自动降级为向量检索
         if mode == "bm25":
-            results = self._bm25_search(
-                query, top_k=top_k, bm25_filters=bm25_filters,
-            )
+            try:
+                results = self._bm25_search(
+                    query, top_k=top_k, bm25_filters=bm25_filters,
+                )
+            except ImportError as e:
+                logger.warning("rank_bm25 未安装，bm25 模式降级为向量检索: %s", e)
+                results = self._vector_search(
+                    query, top_k=top_k, conditions=conditions, params=params,
+                )
         elif mode == "hybrid":
             results = self._hybrid_search(
                 query, top_k=top_k, conditions=conditions, params=params, bm25_filters=bm25_filters,
@@ -466,10 +472,14 @@ class Retriever:
             query, top_k=recall_k, conditions=conditions, params=params,
         )
 
-        # 路径 B: BM25 检索（子语料级过滤）
-        bm25_results = self._bm25_search(
-            query, top_k=recall_k, bm25_filters=bm25_filters,
-        )
+        # 路径 B: BM25 检索（子语料级过滤）；rank_bm25 缺失时降级为纯向量结果
+        try:
+            bm25_results = self._bm25_search(
+                query, top_k=recall_k, bm25_filters=bm25_filters,
+            )
+        except ImportError as e:
+            logger.warning("rank_bm25 未安装，hybrid 模式降级为纯向量检索: %s", e)
+            return vector_results[:top_k]
 
         # RRF 融合
         rrf_scores = {}
@@ -510,15 +520,17 @@ class Retriever:
             self._bm25_index.remove_meeting(meeting_id)
 
     def enrich_results(self, results: list) -> list:
-        """给 search() 结果补 meeting_title + chunk_type_label，供前端直接消费"""
+        """给 search() 结果补 meeting_title / meeting_summary / chunk_type_label"""
         if not results:
             return []
         mids = sorted(set(r["meeting_id"] for r in results))
-        title_map = self._get_meeting_titles(mids)
+        info_map = self._get_meeting_info(mids)
         enriched = []
         for r in results:
             r = dict(r)
-            r["meeting_title"] = title_map.get(r["meeting_id"], f"会议#{r['meeting_id']}")
+            info = info_map.get(r["meeting_id"], {})
+            r["meeting_title"] = info.get("title", f"会议#{r['meeting_id']}")
+            r["meeting_summary"] = info.get("short_summary", "")
             r["chunk_type_label"] = CHUNK_TYPE_LABEL.get(r["chunk_type"], r["chunk_type"])
             enriched.append(r)
         return enriched
@@ -574,21 +586,29 @@ class Retriever:
             self._semantic_splitter = SemanticTextSplitter(self.embeddings)
         return self._semantic_splitter
 
-    def _get_meeting_titles(self, meeting_ids: list) -> dict:
-        """批量查询 meeting_id → title"""
+    def _get_meeting_info(self, meeting_ids: list) -> dict:
+        """批量查询 meeting_id → {title, short_summary}"""
         if not meeting_ids:
             return {}
         try:
             with self.engine.connect() as conn:
                 rows = conn.execute(
                     text(
-                        "SELECT id, title FROM meetings WHERE id = ANY(:ids)"
+                        "SELECT id, title, short_summary FROM meetings WHERE id = ANY(:ids)"
                     ),
                     {"ids": tuple(meeting_ids)},
                 ).fetchall()
-            return {row[0]: row[1] for row in rows}
+            return {
+                row[0]: {"title": row[1] or f"会议#{row[0]}", "short_summary": row[2] or ""}
+                for row in rows
+            }
         except Exception:
             return {}
+
+    def _get_meeting_titles(self, meeting_ids: list) -> dict:
+        """批量查询 meeting_id → title（向后兼容）"""
+        info = self._get_meeting_info(meeting_ids)
+        return {mid: v["title"] for mid, v in info.items()}
 
     @staticmethod
     def _hash_text(text: str) -> str:
