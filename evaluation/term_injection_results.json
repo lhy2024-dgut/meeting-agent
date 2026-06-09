@@ -1,0 +1,80 @@
+{
+  "test_info": {
+    "audio": "D:\\mycodes\\会议纪要智能体\\tests\\fixtures\\audio\\测试样本1（科技）.mp3",
+    "reference": "张伟，Omega-3项目现在到什么阶段了？上周你说DataFlow平台的接口已经联调完了，这周能按时上线吗？李娜那边的CloudLab团队反馈SuperNode模块有个性能瓶颈，王建国正在排查。如果这周修不完，Project-X的交付可能要延期。建议明天拉个会，把AI-Squad小组也叫上，一起对齐一下排期。会议纪要智能体这边也要同步一份给后端团队。",
+    "terms": [
+      "张伟",
+      "Omega-3项目",
+      "DataFlow平台",
+      "CloudLab团队",
+      "SuperNode模块",
+      "Project-X",
+      "AI-Squad小组",
+      "会议纪要智能体"
+    ]
+  },
+  "without_terms": {
+    "label": "不加词表",
+    "hypothesis": "張偉 歐美根 三項目 現在到什麼階段了? 上週你說 Dataflow平台的接口已經連挑完了 這週能按時上線嗎? 李納那邊的Cloud Lab團隊反饋 SuperNode模塊有個性能平景 王健國正在排查 如果這週修不完 Projectlex的交付可能要延期 建議明天拉個會 把AISGROV小組也叫上 一起對期下排期 會議要智能體這邊 也要同步一份給後端團隊",
+    "cer": 0.4602,
+    "cer_pct": "46.02%",
+    "correct_terms": 1,
+    "total_terms": 8,
+    "term_accuracy": "1/8",
+    "term_results": {
+      "张伟": false,
+      "Omega-3项目": false,
+      "DataFlow平台": true,
+      "CloudLab团队": false,
+      "SuperNode模块": false,
+      "Project-X": false,
+      "AI-Squad小组": false,
+      "会议纪要智能体": false
+    },
+    "term_details": {
+      "张伟": "[X] '张伟' 未识别到",
+      "Omega-3项目": "[X] 'Omega-3项目' 未识别到",
+      "DataFlow平台": "[OK] 'DataFlow平台' 正确识别",
+      "CloudLab团队": "[X] 'CloudLab团队' 未识别到",
+      "SuperNode模块": "[X] 'SuperNode模块' 未识别到",
+      "Project-X": "[X] 'Project-X' 未识别到",
+      "AI-Squad小组": "[X] 'AI-Squad小组' 未识别到",
+      "会议纪要智能体": "[X] '会议纪要智能体' 未识别到"
+    },
+    "elapsed_sec": 3.0
+  },
+  "with_terms": {
+    "label": "加词表",
+    "hypothesis": "张伟 Omega-3项目 现在到什么阶段了?上周你说 DataFlow平台的接口已经连条完了 这周能按时上线吗?李娜那边的 CloudLab团队反馈 SuperNode模块有个性能平景 王建国正在排查如果这周修不完 Project-X的交付可能要延期建议明天拉个会把 AI-Squad小组也叫上一起对其下排期 今天也要同步一份给后端团队",
+    "cer": 0.1818,
+    "cer_pct": "18.18%",
+    "correct_terms": 7,
+    "total_terms": 8,
+    "term_accuracy": "7/8",
+    "term_results": {
+      "张伟": true,
+      "Omega-3项目": true,
+      "DataFlow平台": true,
+      "CloudLab团队": true,
+      "SuperNode模块": true,
+      "Project-X": true,
+      "AI-Squad小组": true,
+      "会议纪要智能体": false
+    },
+    "term_details": {
+      "张伟": "[OK] '张伟' 正确识别",
+      "Omega-3项目": "[OK] 'Omega-3项目' 正确识别",
+      "DataFlow平台": "[OK] 'DataFlow平台' 正确识别",
+      "CloudLab团队": "[OK] 'CloudLab团队' 正确识别",
+      "SuperNode模块": "[OK] 'SuperNode模块' 正确识别",
+      "Project-X": "[OK] 'Project-X' 正确识别",
+      "AI-Squad小组": "[OK] 'AI-Squad小组' 正确识别",
+      "会议纪要智能体": "[X] '会议纪要智能体' 未识别到"
+    },
+    "elapsed_sec": 2.8
+  },
+  "improvement": {
+    "cer_drop_pp": 27.84,
+    "term_accuracy_gain": "1/8 → 7/8"
+  }
+}
