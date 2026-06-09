@@ -97,14 +97,13 @@ class SimpleTextSplitter:
         return merged
 
 
-# ── faster-whisper Segment 合并分块器 ────────────────────────────────────────
+# ── Segment 合并分块器（Whisper / SenseVoice 统一实现）────────────────────────
 
-class WhisperSegmentSplitter:
-    """将 faster-whisper 输出的 segments 按目标字数合并成 chunk。
+class SegmentSplitter:
+    """将 ASR segments 按目标字数合并成 chunk（Whisper 和 SenseVoice 通用）。
 
-    每个 segment 格式：{"id": int, "text": str, "start": float, "end": float, ...}
+    segment 格式：{"id": int, "text": str, "start": float, "end": float, ...}
     返回文本列表，用于 rebuild_meeting_index 的 transcript chunk 类型。
-    保持独立实现，便于后续选型后删除。
     """
 
     def __init__(self, target_chars: int = 300):
@@ -128,34 +127,9 @@ class WhisperSegmentSplitter:
         return chunks
 
 
-# ── SenseVoiceSmall Segment 合并分块器 ───────────────────────────────────────
-
-class SenseVoiceSegmentSplitter:
-    """将 SenseVoiceSmall 输出的 segments 按目标字数合并成 chunk。
-
-    segment 格式与 WhisperSegmentSplitter 相同（已在 sense_voice_engine 统一）。
-    保持独立实现，便于后续选型后删除。
-    """
-
-    def __init__(self, target_chars: int = 300):
-        self.target_chars = target_chars
-
-    def split_segments(self, segments: list[dict]) -> list[str]:
-        """合并 segments 直到达到目标字数，返回文本列表"""
-        if not segments:
-            return []
-        chunks, buf = [], ""
-        for seg in segments:
-            text = (seg.get("text") or "").strip()
-            if not text:
-                continue
-            buf += text
-            if len(buf) >= self.target_chars:
-                chunks.append(buf)
-                buf = ""
-        if buf:
-            chunks.append(buf)
-        return chunks
+# 向后兼容别名
+WhisperSegmentSplitter = SegmentSplitter
+SenseVoiceSegmentSplitter = SegmentSplitter
 
 
 # ── 语义切分器 ────────────────────────────────────────────────────────────────

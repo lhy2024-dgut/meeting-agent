@@ -161,12 +161,9 @@ def _transcribe_chunk_worker(args: tuple) -> dict:
         )
         segments = []
         for seg in segments_gen:
-            text = seg.text.strip()
-            if _is_segment_hallucination(text):
-                continue
             segments.append({
                 "id":        seg.id,
-                "text":      text,
+                "text":      seg.text.strip(),
                 "start":     seg.start + start_offset_s,
                 "end":       seg.end   + start_offset_s,
                 "duration":  seg.end - seg.start,
@@ -372,6 +369,8 @@ class ASREngine:
             r = results[idx]
             if r["success"]:
                 all_segments.extend(r["segments"])
+        # 幻觉过滤集中在汇总阶段做一次，worker 不重复过滤
+        all_segments = [s for s in all_segments if not _is_segment_hallucination(s["text"])]
         all_segments.sort(key=lambda s: s["start"])
         yield {"type": "complete", "segments": all_segments}
 

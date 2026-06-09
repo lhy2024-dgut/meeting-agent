@@ -200,12 +200,20 @@ class SenseVoiceEngine:
             text = _postprocess(item.get("text", ""))
             if not text.strip():
                 continue
+            # 从字符级时间戳中提取起止时间（单位 ms），与 _transcribe_chunk 保持一致
+            ts = item.get("timestamp", [])
+            if ts:
+                start_s = ts[0][0] / 1000.0
+                end_s = ts[-1][1] / 1000.0
+            else:
+                start_s = 0.0
+                end_s = total_duration
             yield {
                 "id": seg_id,
                 "text": text,
-                "start": 0.0,
-                "end": total_duration,
-                "duration": total_duration,
+                "start": start_s,
+                "end": end_s,
+                "duration": end_s - start_s,
                 "timestamp": time.time(),
             }, total_duration
             seg_id += 1

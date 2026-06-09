@@ -49,7 +49,7 @@ def truncate_terms(terms: list[str], max_tokens: int = MAX_TOKENS) -> tuple[list
 # ── 持久化 ────────────────────────────────────────────────────────────────────
 
 def save_terms(meeting_id: int, terms: list[str]) -> None:
-    path = TERMS_DIR / f"{meeting_id}.json"
+    path = TERMS_DIR / f"{int(meeting_id)}.json"  # int() 防止路径遍历
     path.write_text(
         json.dumps({"terms": terms, "updated_at": datetime.now().isoformat()},
                    ensure_ascii=False, indent=2),
@@ -59,7 +59,7 @@ def save_terms(meeting_id: int, terms: list[str]) -> None:
 
 
 def load_terms(meeting_id: int) -> list[str]:
-    path = TERMS_DIR / f"{meeting_id}.json"
+    path = TERMS_DIR / f"{int(meeting_id)}.json"  # int() 防止路径遍历
     if not path.exists():
         return []
     try:

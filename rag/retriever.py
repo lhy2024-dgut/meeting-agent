@@ -92,6 +92,9 @@ class Retriever:
         # BM25 索引（懒加载）
         self._bm25_index = None
 
+        # 语义切分器（懒加载，每个实例独立，避免多实例共享 embedding）
+        self._semantic_splitter = None
+
         # Reranker（懒加载）
         self._reranker = None
         self._reranker_loaded = False
@@ -576,8 +579,6 @@ class Retriever:
         if asr_model == ASR_MODEL_SENSEVOICE:
             return SenseVoiceSegmentSplitter(target_chars=300).split_segments(segments)
         return WhisperSegmentSplitter(target_chars=300).split_segments(segments)
-
-    _semantic_splitter = None
 
     def _get_semantic_splitter(self):
         """懒加载语义切分器（复用项目已有的 embedding 实例）"""
