@@ -8,7 +8,7 @@ import streamlit as st
 
 import config
 from agents.chat_agent import ChatAgent
-from chains.minutes_chain import MinutesChain
+from chains.minutes_chain import MinutesChain, PLACEHOLDER_ALL_EMPTY
 from chains.export_chain import ExportChain, list_templates
 from db.repository import MeetingRepository
 from engines.asr_engine import ASREngine, _build_initial_prompt
@@ -75,21 +75,48 @@ def page_result():
             unsafe_allow_html=True,
         )
     with c3:
+        """统一导出区域：支持 docx / md / pdf 格式切换 + 按需生成"""
         output_path = st.session_state.get("output_path")
-        if output_path and Path(output_path).exists():
+        current_fmt = (
+            Path(output_path).suffix.lstrip(".")
+            if output_path and Path(output_path).exists()
+            else None
+        )
+
+        # 格式选择器
+        export_fmt = st.selectbox(
+            "导出格式",
+            ["docx", "md", "pdf"],
+            index=(
+                ["docx", "md", "pdf"].index(current_fmt)
+                if current_fmt in ("docx", "md", "pdf")
+                else 0
+            ),
+            key="export_fmt_selector",
+            label_visibility="collapsed",
+        )
+
+        # 映射 MIME 类型
+        mime_map = {
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "md": "text/markdown; charset=utf-8",
+            "pdf": "application/pdf",
+        }
+
+        # 如果当前已有同格式文件，直接提供下载
+        if output_path and Path(output_path).exists() and Path(output_path).suffix.lstrip(".") == export_fmt:
             p = Path(output_path)
             with open(p, "rb") as f:
                 st.download_button(
-                    label=f"📥导出 · {p.suffix.lstrip('.')}",
+                    label=f"📥 下载 · {export_fmt}",
                     data=f,
-                    file_name=f"meeting_{data.get('meeting_id', 'minutes')}{p.suffix}",
-                    mime="application/octet-stream",
-                    width='stretch',
+                    file_name=f"meeting_{data.get('meeting_id', 'minutes')}.{export_fmt}",
+                    mime=mime_map.get(export_fmt, "application/octet-stream"),
+                    width="stretch",
                 )
         elif data.get("meeting_id") and data.get("minutes", "").strip():
-            # 历史查看模式：临时生成导出文件
-            hist_fmt = st.selectbox("格式", ["docx", "md", "pdf"], key="hist_fmt", label_visibility="collapsed")
-            if st.button("📥 导出", key="btn_hist_export", width='stretch'):
+            # 无缓存或格式不匹配 → 按需生成
+            if st.button(f"📥 生成 · {export_fmt}", key="btn_export_gen", width="stretch"):
                 try:
                     ec = ExportChain()
                     output_data = {
@@ -100,7 +127,7 @@ def page_result():
                         "action_items": data.get("action_items", ""),
                         "resolutions": data.get("resolutions", ""),
                     }
-                    out_path = ec.run(output_data, output_format=hist_fmt)
+                    out_path = ec.run(output_data, output_format=export_fmt)
                     st.session_state.output_path = out_path
                     st.rerun()
                 except Exception as e:
@@ -231,10 +258,7 @@ def page_result():
                 unsafe_allow_html=True,
             )
             action_text = data.get("action_items") or ""
-            if action_text.strip() and action_text.strip() not in (
-                "本次会议未明确待办事项。",
-                "请查看会议纪要",
-            ):
+            if action_text.strip() and action_text.strip() not in PLACEHOLDER_ALL_EMPTY:
                 _render_todos(action_text)
             else:
                 st.markdown(
@@ -251,10 +275,7 @@ def page_result():
                 unsafe_allow_html=True,
             )
             resolution_text = data.get("resolutions") or ""
-            if resolution_text.strip() and resolution_text.strip() not in (
-                "本次会议未明确决议。",
-                "请查看会议纪要",
-            ):
+            if resolution_text.strip() and resolution_text.strip() not in PLACEHOLDER_ALL_EMPTY:
                 _render_resolutions(resolution_text)
             else:
                 st.markdown(
@@ -273,7 +294,7 @@ def page_result():
             unsafe_allow_html=True,
         )
         minutes_text = data.get("minutes") or ""
-        if minutes_text.strip() and minutes_text.strip() != "请查看会议纪要":
+        if minutes_text.strip() and minutes_text.strip() not in PLACEHOLDER_ALL_EMPTY:
             _render_collapsible_minutes(minutes_text)
         else:
             st.info("纪要内容为空，请检查音频质量或重试。")

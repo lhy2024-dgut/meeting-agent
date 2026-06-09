@@ -1,4 +1,4 @@
-from chains.minutes_chain import MinutesChain
+from chains.minutes_chain import MinutesChain, PLACEHOLDER_NO_ACTION, PLACEHOLDER_NO_RESOLUTION
 from chains.export_chain import ExportChain
 from engines.asr_engine import ASREngine, _build_initial_prompt
 from logger import get_logger
@@ -183,9 +183,9 @@ class MeetingService:
                 f"## 转录文本\n{(transcript or '无')[:_FALLBACK_TRANSCRIPT_LEN]}"
             )
         if not (action_items or "").strip():
-            action_items = "本次会议未明确待办事项。"
+            action_items = PLACEHOLDER_NO_ACTION
         if not (resolutions or "").strip():
-            resolutions = "本次会议未明确决议。"
+            resolutions = PLACEHOLDER_NO_RESOLUTION
 
         # Step 5: 持久化
         if progress_callback:

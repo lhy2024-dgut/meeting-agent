@@ -60,8 +60,8 @@ class Retriever:
     def index_meeting(self, meeting_id, transcript="", minutes="", action_items="", resolutions=""):
         texts = [t for t in [transcript, minutes, action_items, resolutions] if t and t.strip()]
         all_chunks = []
-        for text in texts:
-            all_chunks.extend(self.splitter.split_text(text))
+        for t in texts:
+            all_chunks.extend(self.splitter.split_text(t))
 
         if not all_chunks:
             return
@@ -82,18 +82,18 @@ class Retriever:
 
         if exclude_meeting_id:
             sql = text("""
-                SELECT chunk_text, 1 - (embedding <=> :vec) AS similarity
+                SELECT chunk_text, 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
                 FROM meeting_chunks
                 WHERE meeting_id != :exclude_id
-                ORDER BY embedding <=> :vec
+                ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :k
             """)
             params = {"vec": vec, "exclude_id": exclude_meeting_id, "k": top_k}
         else:
             sql = text("""
-                SELECT chunk_text, 1 - (embedding <=> :vec) AS similarity
+                SELECT chunk_text, 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
                 FROM meeting_chunks
-                ORDER BY embedding <=> :vec
+                ORDER BY embedding <=> CAST(:vec AS vector)
                 LIMIT :k
             """)
             params = {"vec": vec, "k": top_k}

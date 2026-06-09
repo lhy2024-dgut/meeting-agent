@@ -615,6 +615,144 @@ def inject():
             transition-duration: 0.01ms !important;
         }}
     }}
+
+    /* ==================================================================
+       DARK MODE
+       ================================================================== */
+    @media (prefers-color-scheme: dark) {{
+        .stApp {{
+            background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%);
+        }}
+        .stApp p, .stApp div, .stApp span, .stApp label,
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+        .stApp li, .stApp td, .stApp th,
+        .stApp [data-testid="stMarkdownContainer"] {{
+            color: #E2E8F0;
+        }}
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{
+            color: #F1F5F9;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"] {{
+            background: #1E293B !important;
+            border-color: #334155 !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:hover {{
+            border-color: #475569 !important;
+        }}
+        .cta-card, .metric-card, .minutes-paper {{
+            background: #1E293B;
+            border-color: #334155;
+        }}
+        .minutes-paper {{
+            color: #E2E8F0;
+        }}
+        .chat-bubble-user {{
+            background: #1E293B;
+            border-color: #334155;
+        }}
+        .chat-bubble-assistant {{
+            background: rgba(99, 102, 241, 0.15);
+        }}
+        input[data-baseweb="input"],
+        textarea[data-baseweb="textarea"] {{
+            background: #1E293B !important;
+            color: #E2E8F0 !important;
+            border-color: #475569 !important;
+        }}
+        [data-testid="stSidebar"] {{
+            background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%);
+        }}
+        .stButton > button[kind="secondary"] {{
+            background: #1E293B;
+            color: #818CF8;
+            border-color: #475569;
+        }}
+        .stButton > button[kind="secondary"]:hover {{
+            background: rgba(99, 102, 241, 0.15);
+            border-color: #818CF8;
+        }}
+        .stButton > button[kind="tertiary"] {{
+            color: #94A3B8;
+        }}
+        .stButton > button[kind="tertiary"]:hover {{
+            background: rgba(255, 255, 255, 0.05);
+            color: #E2E8F0;
+        }}
+        .app-header {{
+            border-bottom-color: #334155;
+        }}
+        hr {{
+            border-color: #334155;
+        }}
+        [data-testid="stExpander"] summary {{
+            color: #94A3B8;
+        }}
+        .todo-item:hover {{
+            background: rgba(255, 255, 255, 0.03);
+        }}
+        .decision-item {{
+            background: rgba(99, 102, 241, 0.1);
+        }}
+        .decision-item:hover {{
+            background: rgba(99, 102, 241, 0.18);
+        }}
+        .transcript-line:hover {{
+            background: rgba(255, 255, 255, 0.03);
+        }}
+        .transcript-ts {{
+            background: rgba(255, 255, 255, 0.06);
+            color: #64748B;
+        }}
+        .error-card {{
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+        }}
+        .empty-title {{
+            color: #F1F5F9;
+        }}
+        [data-testid="stSuccess"] div,
+        [data-testid="stInfo"] div,
+        [data-testid="stWarning"] div,
+        [data-testid="stError"] div {{
+            background: rgba(0,0,0,0.2) !important;
+        }}
+    }}
+
+    /* ==================================================================
+       COLLAPSIBLE TEXT
+       ================================================================== */
+    .text-collapsed {{
+        max-height: 320px;
+        overflow: hidden;
+        position: relative;
+    }}
+    .text-collapsed::after {{
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 80px;
+        background: linear-gradient(transparent, #F1F5F9);
+        pointer-events: none;
+    }}
+    @media (prefers-color-scheme: dark) {{
+        .text-collapsed::after {{
+            background: linear-gradient(transparent, #1E293B);
+        }}
+    }}
+
+    /* ==================================================================
+       TABLE HORIZONTAL SCROLL
+       ================================================================== */
+    .stDataFrame {{
+        overflow-x: auto;
+        max-width: 100%;
+    }}
+    .stDataFrame table {{
+        width: 100%;
+        min-width: 400px;
+    }}
     </style>
     """,
         unsafe_allow_html=True,

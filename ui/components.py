@@ -146,6 +146,11 @@ def error_card(title, description, retry_label="重试", retry_key="retry"):
         return st.button(retry_label, key=retry_key, type="primary", width='stretch')
 
 
+def loading_indicator(message: str = "处理中..."):
+    """统一加载指示器"""
+    return st.status(message, state="running")
+
+
 def suggestion_pills(suggestions, prefix="sg"):
     """建议问题标签组"""
     cols = st.columns(len(suggestions))
