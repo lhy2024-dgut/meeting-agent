@@ -18,7 +18,7 @@
 | 2 | ASR 语音识别评估 | ✅ 完成 | CER = **55.08%**（25 文件统一引擎） |
 | 3 | 金标准摘要生成 | ✅ 完成 | 16 场摘要 |
 | 4 | RAG 知识库构建 | ✅ 完成 | 470 个向量片段 |
-| 5 | QA 对 + 检索评估 | ✅ 完成 | Recall@5 = **96.15%**, MRR = **0.8923** |
+| 5 | QA 对 + 检索评估 | ✅ 完成 | Recall@5 = **96.15%**, MRR = **0.8718**[^mrr-note] |
 | 6 | 进阶实验：ASR vs 干净对比 | ✅ 完成 | Recall 下降仅 **↓ 3.84%**（完整 8 场覆盖） |
 
 ### 0.2 数据流向
@@ -1182,20 +1182,24 @@ Phase 3（长期）
 
 ### 9.5 下一步行动
 
-**Phase 1（本周 → 6.9 DDL）**
-- [ ] **🔴 高优先级**：提交术语词表 PR（代码 5 月已完成，需合入主分支）
-- [ ] **🔴 高优先级**：修复 `minutes_chain.py`，让 LLM 输出结构化的 action_items/resolutions
-- [ ] **🔴 高优先级**：新增 .md / .pdf 导出功能（本周 6.9 DDL）
+**Phase 1（已全部完成 ✅）**
+- [x] **🔴 已完**：提交术语词表 PR — PR #12，6/9 合入 `dev`
+- [x] **🔴 已完**：新增 .md / .pdf 导出功能 — `export_chain.py` + `pdf_engine.py`，6/5 完成
+- [x] **🔴 已完**：`minutes_chain.py` 已加 AIMessage 兼容 + action_items/resolutions fallback 提取（`raw.content` 解析）
+- [x] **🟡 已完**：金标准摘要人工校对 — 16/16 场全部审完（`gold_summaries_review.md`）
 
-**Phase 2（下周 → 6.16）**
+**Phase 2（下阶段推荐）**
 - [ ] **🟡 中优先级**：升级 ASR 模型至 Whisper medium（~35% CER）或 SenseVoice（中文专用）
 - [ ] **🟡 中优先级**：引入 Hybrid Search（向量 + BM25）提升 RAG 召回率
 - [ ] **🟡 中优先级**：引入 Reranker（bge-reranker-v2）提升 MRR 排序质量
 - [ ] **🟡 中优先级**：LLM 升级至 qwen3.5:8b，减少幻觉，支持 structured output
-- [ ] **🟡 中优先级**：人工校对前 5 份金标准摘要（检查幻觉）
 
 **Phase 3（长期）**
 - [ ] **🟢 低优先级**：音频预处理（降噪 + VAD）解决卡顿/噪音导致的异常高 CER
 - [ ] **🟢 低优先级**：扩展 QA 对至 50+ 提高评估统计显著性
 - [ ] **🟢 低优先级**：AliMeeting 远场评估（当前仅近场 8 场）
 - [ ] **🟢 低优先级**：将本报告发布到 GitHub Issue（手动 paste 到 github.com/lhy2024-dgut/meeting-agent）
+
+---
+
+[^mrr-note]: 本节总览表的 MRR 使用 **advanced_experiment.py** 的对比值（0.8718），与其他文档统一。检索评估脚本 `retrieval_eval.py` 单独跑的 MRR 为 0.8923（见 §6.4），两者差异源于 SQL 过滤方式不同（§6.8）。
