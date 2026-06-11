@@ -10,6 +10,11 @@ from ui.components import empty_state
 
 
 def page_history():
+    # 清理历史删除确认状态（防止跨页面残留）
+    for key in list(st.session_state.keys()):
+        if key.startswith("hist_del_confirm_"):
+            st.session_state[key] = False
+
     st.header("历史会议")
 
     db = MeetingRepository()

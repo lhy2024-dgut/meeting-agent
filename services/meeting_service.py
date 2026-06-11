@@ -1,13 +1,13 @@
-import json
+﻿import json
 import re
 import time
 from pathlib import Path
 
 import yaml
 
-from chains.minutes_chain import MinutesChain
 from chains.export_chain import ExportChain
-from engines.asr_engine import ASREngine, get_asr_engine, _get_audio_duration, _PARALLEL_MIN_SEC
+from chains.minutes_chain import MinutesChain, PLACEHOLDER_NO_ACTION, PLACEHOLDER_NO_RESOLUTION
+from engines.asr_engine import ASREngine, _PARALLEL_MIN_SEC, _get_audio_duration, get_asr_engine
 from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
@@ -22,7 +22,7 @@ ASR_MODEL_SENSEVOICE = "SenseVoiceSmall"
 
 
 class MeetingService:
-    """会议处理完整流程，所有依赖通过构造函数注入"""
+    """会议处理完整流程，所有依赖通过构造函数注入。"""
 
     def __init__(self, db_repo, asr_engine=None, minutes_chain=None, export_chain=None):
         self.db = db_repo
@@ -34,21 +34,18 @@ class MeetingService:
     @property
     def asr(self):
         if self._asr is None:
-            self._asr = get_asr_engine()   # 返回模块级单例，不重复加载模型
+            self._asr = get_asr_engine()
         return self._asr
 
     def _get_engine(self, asr_model: str):
-        """根据 asr_model 名称返回对应引擎单例"""
+        """根据 asr_model 名称返回对应引擎单例。"""
         if asr_model == ASR_MODEL_SENSEVOICE:
             if self._sv_engine is None:
                 from engines.sense_voice_engine import get_sensevoice_engine
-                self._sv_engine = get_sensevoice_engine()  # 模块级单例
+
+                self._sv_engine = get_sensevoice_engine()
             return self._sv_engine
         return self.asr
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def process(
         self,
@@ -65,9 +62,9 @@ class MeetingService:
         terms=None,
         chunk_strategy=None,
     ):
-        """批量处理：ASR → 分类 → LLM → 持久化 → RAG → 导出"""
+        """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
         cached = self.db.get_meeting_by_hash(file_hash)
-        if cached and any(
+        if not terms and cached and any(
             [cached.minutes_text, cached.action_items_text, cached.resolutions_text]
         ):
             return self._handle_cache_hit(cached, output_format, template_path, progress_callback)
@@ -79,10 +76,20 @@ class MeetingService:
         transcript = " ".join(seg.get("text", "") for seg in segments)
 
         return self._finalize(
-            segments, transcript, file_path, file_hash, title, meeting_dt,
-            output_format, template_path, progress_callback,
-            scene=scene, custom_headings=custom_headings, terms=terms,
-            chunk_strategy=chunk_strategy, asr_model=asr_model,
+            segments,
+            transcript,
+            file_path,
+            file_hash,
+            title,
+            meeting_dt,
+            output_format,
+            template_path,
+            progress_callback,
+            scene=scene,
+            custom_headings=custom_headings,
+            terms=terms,
+            chunk_strategy=chunk_strategy,
+            asr_model=asr_model,
         )
 
     def process_stream(
@@ -101,13 +108,7 @@ class MeetingService:
         chunk_strategy=None,
         transcription_mode="auto",
     ):
-        """流式处理：边转写边返回结果
-
-        transcription_mode:
-          "auto"     — 按时长自动选择（≥90s 并行，否则直接）
-          "direct"   — 强制直接转写
-          "parallel" — 强制并行转写
-        """
+        """流式处理：边转写边返回结果。"""
         engine = self._get_engine(asr_model)
         asr_start = time.time()
 
@@ -130,8 +131,13 @@ class MeetingService:
                     )
                     if progress_callback:
                         progress_callback(event["pct"], msg)
-                    yield {"type": "parallel_progress", "pct": event["pct"], "msg": msg,
-                           "completed": event["completed"], "total": event["total"]}
+                    yield {
+                        "type": "parallel_progress",
+                        "pct": event["pct"],
+                        "msg": msg,
+                        "completed": event["completed"],
+                        "total": event["total"],
+                    }
                 elif event["type"] == "complete":
                     segments = event["segments"]
             transcript = " ".join(seg.get("text", "") for seg in segments)
@@ -155,10 +161,20 @@ class MeetingService:
         asr_time = time.time() - asr_start
 
         final = self._finalize(
-            segments, transcript, file_path, file_hash, title, meeting_dt,
-            output_format, template_path, progress_callback,
-            scene=scene, custom_headings=custom_headings, terms=terms,
-            chunk_strategy=chunk_strategy, asr_model=asr_model,
+            segments,
+            transcript,
+            file_path,
+            file_hash,
+            title,
+            meeting_dt,
+            output_format,
+            template_path,
+            progress_callback,
+            scene=scene,
+            custom_headings=custom_headings,
+            terms=terms,
+            chunk_strategy=chunk_strategy,
+            asr_model=asr_model,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -169,19 +185,15 @@ class MeetingService:
     def export(self, data, output_format="docx", template_path=None):
         return self.export_chain.run(data, output_format, template_path)
 
-    # ------------------------------------------------------------------
-    # Private: shared pipeline
-    # ------------------------------------------------------------------
-
     def _handle_cache_hit(self, cached, output_format, template_path, progress_callback):
         segments = [
             {
-                "start": t.start_time,
-                "end": t.end_time,
-                "text": t.text,
-                "duration": (t.end_time or 0) - (t.start_time or 0),
+                "start": item.start_time,
+                "end": item.end_time,
+                "text": item.text,
+                "duration": (item.end_time or 0) - (item.start_time or 0),
             }
-            for t in cached.transcriptions
+            for item in cached.transcriptions
         ]
         transcript = " ".join(seg["text"] for seg in segments)
         output_data = {
@@ -227,8 +239,7 @@ class MeetingService:
         chunk_strategy=None,
         asr_model=None,
     ):
-        """Steps 3-7: 分类 → LLM 提取 → 持久化 → RAG 索引 → 导出"""
-        # Step 3: 分类
+        """Steps 3-7: 分类 -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。"""
         if progress_callback:
             progress_callback(55, "📊 分析会议特征...")
         duration = max((seg.get("end", 0) for seg in segments), default=0)
@@ -238,53 +249,55 @@ class MeetingService:
             title, file_path, duration_category, environment, file_hash
         )
 
-        # 保存术语词表（如有）
         if terms:
             try:
                 save_terms(meeting_id, terms)
-            except Exception as e:
-                logger.warning("保存术语词表失败: %s", e)
+            except Exception as exc:
+                logger.warning("保存术语词表失败: %s", exc)
 
-        # Step 4: LLM 提取
         if progress_callback:
             progress_callback(65, "🤖 生成会议纪要...")
         date_str = meeting_dt.strftime("%Y-%m-%d %H:%M")
         action_items, resolutions, minutes = self.minutes_chain.run(
-            transcript, title=title, date=date_str,
-            scene=scene, custom_headings=custom_headings,
+            transcript,
+            title=title,
+            date=date_str,
+            scene=scene,
+            custom_headings=custom_headings,
         )
 
         if not (minutes or "").strip():
             if len(transcript or "") > _FALLBACK_TRANSCRIPT_LEN:
                 logger.warning(
                     "纪要生成返回空，回退原文截断 (%d -> %d 字符)",
-                    len(transcript), _FALLBACK_TRANSCRIPT_LEN,
+                    len(transcript),
+                    _FALLBACK_TRANSCRIPT_LEN,
                 )
             minutes = (
                 f"# 会议纪要：{title}\n\n**日期**：{date_str}\n\n"
                 f"## 转录文本\n{(transcript or '无')[:_FALLBACK_TRANSCRIPT_LEN]}"
             )
         if not (action_items or "").strip():
-            action_items = "本次会议未明确待办事项。"
+            action_items = PLACEHOLDER_NO_ACTION
         if not (resolutions or "").strip():
-            resolutions = "本次会议未明确决议。"
+            resolutions = PLACEHOLDER_NO_RESOLUTION
 
-        # Step 4.5: 摘要 + 项目名生成
         if progress_callback:
             progress_callback(72, "📝 生成摘要...")
         short_summary, project_name = self._generate_summary(transcript, minutes)
 
-        # Step 5: 持久化
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
         self.db.add_transcriptions_bulk(meeting_id, segments)
         self.db.update_meeting_results(
-            meeting_id, minutes, action_items, resolutions,
+            meeting_id,
+            minutes,
+            action_items,
+            resolutions,
             short_summary=short_summary,
             project_name=project_name,
         )
 
-        # Step 6: 向量索引 (RAG)
         if progress_callback:
             progress_callback(88, "🔍 索引到知识库...")
         try:
@@ -298,10 +311,9 @@ class MeetingService:
                 segments=segments,
                 asr_model=asr_model or ASR_MODEL_WHISPER,
             )
-        except Exception as e:
-            logger.warning("RAG 索引重建失败，已保留旧索引: %s", e)
+        except Exception as exc:
+            logger.warning("RAG 索引重建失败，已保留旧索引: %s", exc)
 
-        # Step 7: 导出
         if progress_callback:
             progress_callback(95, "📄 导出文档...")
         output_data = {
@@ -332,40 +344,35 @@ class MeetingService:
             "environment": environment,
         }
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _generate_summary(transcript, minutes):
-        """调用 LLM 生成 short_summary 和 project_name。
-        失败时返回安全 fallback 值，不抛异常。
-        """
+        """调用 LLM 生成 short_summary 和 project_name，失败时回退。"""
         try:
             template_path = (
                 Path(__file__).resolve().parent.parent
-                / "prompts" / "templates" / "auto_summary.yaml"
+                / "prompts"
+                / "templates"
+                / "auto_summary.yaml"
             )
-            with open(template_path, "r", encoding="utf-8") as f:
-                template = yaml.safe_load(f)
+            with open(template_path, "r", encoding="utf-8") as file:
+                template = yaml.safe_load(file)
             system_prompt = template["system"].format(
                 transcript=(transcript or "")[:3000],
                 minutes=(minutes or "")[:1000],
             )
-        except Exception as e:
-            logger.warning("加载 auto_summary 模板失败: %s", e)
+        except Exception as exc:
+            logger.warning("加载 auto_summary 模板失败: %s", exc)
             return (minutes or "")[:200], "未分类"
 
         try:
             llm = get_llm(temperature=0.1)
             response = llm.invoke(system_prompt)
             text = response.content if hasattr(response, "content") else str(response)
-        except Exception as e:
-            logger.warning("摘要 LLM 调用失败: %s", e)
+        except Exception as exc:
+            logger.warning("摘要 LLM 调用失败: %s", exc)
             return (minutes or "")[:200], "未分类"
 
         try:
-            # 移除可能的 ```json 包装
             text = text.strip()
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
@@ -373,13 +380,13 @@ class MeetingService:
             project_name = str(data.get("project_name", "未分类"))[:20]
             short_summary = str(data.get("short_summary", ""))[:200]
             return short_summary, project_name
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
-            logger.warning("摘要 JSON 解析失败: %s, raw=%s", e, text[:100])
+        except (json.JSONDecodeError, TypeError, KeyError) as exc:
+            logger.warning("摘要 JSON 解析失败: %s, raw=%s", exc, text[:100])
             return (minutes or "")[:200], "未分类"
 
     @staticmethod
     def _estimate_speaker_count_heuristic(segments):
-        """启发式估计说话人数，仅供 UI 展示参考，不参与数据分类决策"""
+        """启发式估计说话人数，仅供 UI 展示参考。"""
         if not segments:
             return 1
         avg = sum(seg.get("duration", 0.0) for seg in segments) / max(len(segments), 1)

@@ -11,3 +11,28 @@ storage/templates/*
 !storage/audio/.gitkeep
 !storage/output/.gitkeep
 !storage/templates/.gitkeep
+
+# 个人评估脚本和数据（自己留着跑，不进版本）
+evaluation/
+data/
+
+# 运行时数据（不进入版本）
+storage/terms/
+
+# 个人任务文档
+5.31-6.2任务.md
+我的任务.md
+更新.md
+更新2.txt
+本周任务*.md
+理解*.md
+evaluation-plan*.md
+
+# 调试/临时文件
+_debug_pdf.py
+test_silence.wav
+meeting_7.pdf
+
+# 测试音频
+*.mp3
+*.wav

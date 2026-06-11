@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+﻿from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import or_
@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 class MeetingRepository:
-    """会议数据仓库，支持依赖注入覆盖数据库连接"""
+    """会议数据仓库，支持依赖注入覆盖数据库连接。"""
 
     def __init__(self, db_url=None):
         self.engine = get_engine(url=db_url) if db_url else get_engine()
@@ -20,7 +20,7 @@ class MeetingRepository:
 
     @contextmanager
     def _write_session(self):
-        """写事务：commit on success, rollback on error"""
+        """写事务：成功提交，失败回滚。"""
         session = self.Session()
         try:
             yield session
@@ -33,14 +33,12 @@ class MeetingRepository:
 
     @contextmanager
     def _read_session(self):
-        """只读会话：不 commit，用完即关"""
+        """只读会话：不提交，用完即关。"""
         session = self.Session()
         try:
             yield session
         finally:
             session.close()
-
-    # ---- 写操作 ----
 
     def create_meeting(self, title, audio_path, duration_category, environment, file_hash=""):
         with self._write_session() as session:
@@ -56,8 +54,15 @@ class MeetingRepository:
             session.flush()
             return meeting.id
 
-    def update_meeting_results(self, meeting_id, minutes, action_items, resolutions,
-                               short_summary=None, project_name=None):
+    def update_meeting_results(
+        self,
+        meeting_id,
+        minutes,
+        action_items,
+        resolutions,
+        short_summary=None,
+        project_name=None,
+    ):
         with self._write_session() as session:
             meeting = session.query(Meeting).filter_by(id=meeting_id).first()
             if meeting:
@@ -71,7 +76,7 @@ class MeetingRepository:
                 meeting.updated_at = datetime.now()
 
     def update_meeting_project_name(self, meeting_id, project_name):
-        """供前端单字段编辑"""
+        """供前端单字段编辑。"""
         with self._write_session() as session:
             meeting = session.query(Meeting).filter_by(id=meeting_id).first()
             if meeting:
@@ -86,16 +91,40 @@ class MeetingRepository:
         mappings = []
         for seg in segments:
             text_content = seg.get("text", "")
-            mappings.append({
-                "meeting_id": meeting_id,
-                "text": text_content,
-                "timestamp": seg.get("timestamp", 0.0),
-                "start_time": seg.get("start", 0.0),
-                "end_time": seg.get("end", 0.0),
-                "summary": text_content,
-                "audio_segment": seg.get("audio_segment", ""),
-            })
+            mappings.append(
+                {
+                    "meeting_id": meeting_id,
+                    "text": text_content,
+                    "timestamp": seg.get("timestamp", 0.0),
+                    "start_time": seg.get("start", 0.0),
+                    "end_time": seg.get("end", 0.0),
+                    "summary": text_content,
+                    "audio_segment": seg.get("audio_segment", ""),
+                }
+            )
         with self._write_session() as session:
+            session.bulk_insert_mappings(Transcription, mappings)
+
+    def replace_transcriptions(self, meeting_id, segments):
+        """Replace all stored transcription segments for a meeting."""
+        with self._write_session() as session:
+            session.query(Transcription).filter_by(meeting_id=meeting_id).delete()
+            if not segments:
+                return
+            mappings = []
+            for seg in segments:
+                text_content = seg.get("text", "")
+                mappings.append(
+                    {
+                        "meeting_id": meeting_id,
+                        "text": text_content,
+                        "timestamp": seg.get("timestamp", 0.0),
+                        "start_time": seg.get("start", 0.0),
+                        "end_time": seg.get("end", 0.0),
+                        "summary": text_content,
+                        "audio_segment": seg.get("audio_segment", ""),
+                    }
+                )
             session.bulk_insert_mappings(Transcription, mappings)
 
     def delete_meeting(self, meeting_id):
@@ -105,8 +134,6 @@ class MeetingRepository:
                 session.delete(meeting)
                 return True
             return False
-
-    # ---- 读操作 ----
 
     def get_meeting_by_hash(self, file_hash):
         if not file_hash:
@@ -129,12 +156,12 @@ class MeetingRepository:
             )
 
     def get_all_meetings_safe(self):
-        """兼容旧数据库（无 short_summary/project_name 列）的查询"""
+        """兼容旧数据库（无 short_summary/project_name 列）的查询。"""
         from sqlalchemy import inspect, text
+
         with self._read_session() as session:
-            # 检测新列是否存在
-            insp = inspect(session.get_bind())
-            cols = [c["name"] for c in insp.get_columns("meetings")]
+            inspector = inspect(session.get_bind())
+            cols = [col["name"] for col in inspector.get_columns("meetings")]
             has_new_cols = "short_summary" in cols
 
             if has_new_cols:
@@ -144,56 +171,64 @@ class MeetingRepository:
                     .order_by(Meeting.created_at.desc())
                     .all()
                 )
-            else:
-                # 不回新列，避免 UndefinedColumn 错误
-                rows = session.execute(
-                    text(
-                        "SELECT id, title, created_at, updated_at, audio_path, "
-                        "duration_category, environment, file_hash, "
-                        "minutes_text, action_items_text, resolutions_text "
-                        "FROM meetings ORDER BY created_at DESC"
-                    )
-                ).fetchall()
-                meetings = []
-                for row in rows:
-                    m = Meeting(
-                        id=row.id, title=row.title, created_at=row.created_at,
-                        updated_at=row.updated_at, audio_path=row.audio_path,
-                        duration_category=row.duration_category,
-                        environment=row.environment, file_hash=row.file_hash,
-                        minutes_text=row.minutes_text,
-                        action_items_text=row.action_items_text,
-                        resolutions_text=row.resolutions_text,
-                    )
-                    meetings.append(m)
-                return meetings
 
-    def get_meetings_paginated(self, page=0, page_size=10, search="",
-                               dur_filter=None, env_filter=None):
-        """分页查询会议列表，不加载 transcriptions（性能优化）"""
+            rows = session.execute(
+                text(
+                    "SELECT id, title, created_at, updated_at, audio_path, "
+                    "duration_category, environment, file_hash, "
+                    "minutes_text, action_items_text, resolutions_text "
+                    "FROM meetings ORDER BY created_at DESC"
+                )
+            ).fetchall()
+            meetings = []
+            for row in rows:
+                meeting = Meeting(
+                    id=row.id,
+                    title=row.title,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                    audio_path=row.audio_path,
+                    duration_category=row.duration_category,
+                    environment=row.environment,
+                    file_hash=row.file_hash,
+                    minutes_text=row.minutes_text,
+                    action_items_text=row.action_items_text,
+                    resolutions_text=row.resolutions_text,
+                )
+                meetings.append(meeting)
+            return meetings
+
+    def get_meetings_paginated(self, page=0, page_size=10, search="", dur_filter=None, env_filter=None):
+        """分页查询会议列表，不加载 transcriptions。"""
         with self._read_session() as session:
-            q = session.query(Meeting)
+            query = session.query(Meeting)
 
             if search:
-                q = q.filter(or_(
-                    Meeting.title.ilike(f"%{search}%"),
-                    Meeting.short_summary.ilike(f"%{search}%"),
-                    Meeting.project_name.ilike(f"%{search}%"),
-                ))
+                query = query.filter(
+                    or_(
+                        Meeting.title.ilike(f"%{search}%"),
+                        Meeting.short_summary.ilike(f"%{search}%"),
+                        Meeting.project_name.ilike(f"%{search}%"),
+                    )
+                )
             if dur_filter and dur_filter != "全部":
-                mapping = {"短会 (<5min)": "short", "中等 (5-30min)": "medium", "长会 (>30min)": "long"}
-                val = mapping.get(dur_filter)
-                if val:
-                    q = q.filter(Meeting.duration_category == val)
+                mapping = {
+                    "短会 (<5min)": "short",
+                    "中等 (5-30min)": "medium",
+                    "长会 (>30min)": "long",
+                }
+                value = mapping.get(dur_filter)
+                if value:
+                    query = query.filter(Meeting.duration_category == value)
             if env_filter and env_filter != "全部":
                 mapping = {"安静": "quiet", "嘈杂": "noisy", "多人": "multi_speaker"}
-                val = mapping.get(env_filter)
-                if val:
-                    q = q.filter(Meeting.environment == val)
+                value = mapping.get(env_filter)
+                if value:
+                    query = query.filter(Meeting.environment == value)
 
-            total = q.count()
+            total = query.count()
             meetings = (
-                q.order_by(Meeting.created_at.desc())
+                query.order_by(Meeting.created_at.desc())
                 .offset(page * page_size)
                 .limit(page_size)
                 .all()

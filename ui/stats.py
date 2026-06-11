@@ -26,24 +26,19 @@ def page_stats():
     long = sum(1 for m in meetings if m.duration_category == "long")
     multi = sum(1 for m in meetings if m.environment == "multi_speaker")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
         with st.container(border=True):
             st.markdown(f'<div class="metric-value">{total}</div>', unsafe_allow_html=True)
             st.markdown('<div class="metric-label">总会议</div>', unsafe_allow_html=True)
     with c2:
         with st.container(border=True):
-            st.markdown(f'<div class="metric-value">{short + medium + long}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="metric-label">已完成</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-value">{short}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="metric-label">短会（<5min）</div>', unsafe_allow_html=True)
     with c3:
         with st.container(border=True):
             st.markdown(f'<div class="metric-value" style="color:#F29E4C">{multi}</div>', unsafe_allow_html=True)
             st.markdown('<div class="metric-label">多人会议</div>', unsafe_allow_html=True)
-    with c4:
-        with st.container(border=True):
-            # 平均时长：从 meetings 里估算
-            st.markdown(f'<div class="metric-value">~4m</div>', unsafe_allow_html=True)
-            st.markdown('<div class="metric-label">平均处理</div>', unsafe_allow_html=True)
 
     st.divider()
 

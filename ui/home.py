@@ -77,7 +77,7 @@ def page_home():
     if meetings:
         st.subheader("最近会议")
         shown = meetings[:3]
-        cols = st.columns(len(shown), gap="medium")
+        cols = st.columns(3, gap="medium")
         for i, m in enumerate(shown):
             with cols[i]:
                 with st.container(border=True):
