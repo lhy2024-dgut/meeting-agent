@@ -1,6 +1,22 @@
 import hashlib
+import os
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def _find_ffmpeg() -> str:
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for d in [r"D:\ffmpeg\bin", r"C:\ffmpeg\bin", r"C:\Program Files\ffmpeg\bin"]:
+        p = os.path.join(d, "ffmpeg.exe")
+        if os.path.isfile(p):
+            return p
+    return "ffmpeg"
+
+
+_FFMPEG = _find_ffmpeg()
 
 
 def extract_audio_from_video(video_path):
@@ -10,7 +26,7 @@ def extract_audio_from_video(video_path):
         return str(output_path)
     subprocess.run(
         [
-            "ffmpeg",
+            _FFMPEG,
             "-y", "-i", str(video_path),
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",

@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """上传页"""
 
+import difflib
+import html
+import re
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +14,9 @@ import config
 from db.repository import MeetingRepository
 from prompts.templates import PromptTemplateLoader
 from services.file_service import FileService
-from services.meeting_service import MeetingService
+from services.meeting_service import MeetingService, ASR_MODEL_WHISPER, ASR_MODEL_SENSEVOICE
+from config import CHUNK_STRATEGY_FIXED, CHUNK_STRATEGY_SEGMENT, CHUNK_STRATEGY_SEMANTIC
+from services.terms_service import truncate_terms, _estimate_tokens
 from ui.components import error_card, progress_steps
 
 
@@ -33,6 +39,29 @@ def page_upload():
         key="upload_main",
     )
 
+    # ── 文件一旦上传，立即保存到磁盘并记入 session_state ──────────────────
+    # 这样后续 rerun（如用户在 expander 内输入文本）不会因 uploaded 变 None 而
+    # 导致按钮误判为 disabled 或处理流中出现 NoneType 错误。
+    if uploaded is not None:
+        _saved_name = st.session_state.get("_saved_file_name")
+        if _saved_name != uploaded.name:
+            _fs_early = FileService()
+            _ext_early = Path(uploaded.name).suffix.lower()
+            _saved_path, _saved_hash = _fs_early.save_uploaded(
+                uploaded,
+                "video" if _ext_early in config.ALLOWED_VIDEO_EXTENSIONS else "audio",
+            )
+            st.session_state["_saved_file_path"] = _saved_path
+            st.session_state["_saved_file_hash"] = _saved_hash
+            st.session_state["_saved_file_ext"] = _ext_early
+            st.session_state["_saved_file_name"] = uploaded.name
+    else:
+        # 用户清除了文件 → 同步清除 session_state 里的缓存路径
+        for _k in ["_saved_file_path", "_saved_file_hash", "_saved_file_ext", "_saved_file_name"]:
+            st.session_state.pop(_k, None)
+
+    _has_file = st.session_state.get("_saved_file_path") is not None
+
     if uploaded:
         st.audio(uploaded)
         st.markdown('<div style="padding:0.5rem"></div>', unsafe_allow_html=True)
@@ -41,7 +70,7 @@ def page_upload():
     with st.container(border=True):
         title = st.text_input(
             "会议标题",
-            value=uploaded.name.rsplit(".", 1)[0] if uploaded else "",
+            value=st.session_state.get("_saved_file_name", "").rsplit(".", 1)[0],
         )
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -117,65 +146,140 @@ def page_upload():
             if preview["description"]:
                 st.caption(f"ℹ️ {preview['description']}")
 
-        with st.expander("▸ 高级选项", expanded=False):
-            # 术语词表输入
-            st.markdown(
-                '<div style="font-size:14px;font-weight:600;color:#1E293B;margin-bottom:4px">'
-                "📖 术语词表</div>",
-                unsafe_allow_html=True,
-            )
-            st.caption("每行一个词条，填入专有名词可提升 ASR 识别准确率")
+        st.divider()
 
-            terms_text = st.text_area(
-                "词表输入",
-                placeholder="分布式系统实验室\n张伟\nProject-X\nDataFlow\n...",
-                key="terms_textarea",
-                label_visibility="collapsed",
+        # ── ASR 模型选择 ──────────────────────────────────────────────────────
+        asr_model = st.radio(
+            "语音识别模型",
+            options=[ASR_MODEL_WHISPER, ASR_MODEL_SENSEVOICE],
+            index=0,
+            horizontal=True,
+            help=(
+                "**faster-whisper**：OpenAI Whisper 加速版，支持 initial_prompt 术语注入\n\n"
+                "**SenseVoiceSmall**：FunAudioLLM 开源模型，内置 VAD，支持 hotword 术语注入"
+            ),
+        )
+
+        # ── Chunk 切分策略选择 ────────────────────────────────────────────────
+        _CHUNK_OPTIONS = {
+            CHUNK_STRATEGY_FIXED:    "固定 512 字",
+            CHUNK_STRATEGY_SEGMENT:  "按句子合并 300 字",
+            CHUNK_STRATEGY_SEMANTIC: "语义切分",
+        }
+        _CHUNK_HELP = {
+            CHUNK_STRATEGY_FIXED:
+                "按字符数递归切分，512 字一块，64 字重叠。速度最快，适合大多数场景。",
+            CHUNK_STRATEGY_SEGMENT:
+                "将 ASR 输出的 segment 逐句合并至约 300 字，天然语义完整，自带时间戳。"
+                "需配合所选 ASR 模型使用（faster-whisper / SenseVoiceSmall 各有独立实现）。",
+            CHUNK_STRATEGY_SEMANTIC:
+                "用 bge-m3 计算相邻句子余弦相似度，在话题切换处（相似度断崖）切块。"
+                "chunk 语义最连贯，但需额外 embedding 计算，速度稍慢。",
+        }
+        chunk_strategy_label = st.radio(
+            "RAG 切分策略",
+            options=list(_CHUNK_OPTIONS.keys()),
+            format_func=lambda k: _CHUNK_OPTIONS[k],
+            index=0,
+            horizontal=True,
+            key="chunk_strategy_selector",
+        )
+        st.caption(f"ℹ️ {_CHUNK_HELP[chunk_strategy_label]}")
+
+        # ── 转写策略选择 ──────────────────────────────────────────────────────
+        transcription_mode = st.radio(
+            "转写策略",
+            options=["auto", "direct", "parallel"],
+            format_func=lambda m: {"auto": "自动（按时长）", "direct": "直接转写", "parallel": "并行转写"}[m],
+            index=0,
+            horizontal=True,
+            help=(
+                "**自动**：音频 <90s 直接转写，≥90s 自动切换并行\n\n"
+                "**直接转写**：单进程顺序转写，资源占用低\n\n"
+                "**并行转写**：ffmpeg 切块 + 多进程，长音频速度更快"
+            ),
+        )
+
+        # ── 术语词表输入 ──────────────────────────────────────────────────────
+        kept = []  # 默认为空，在 expander 内赋值
+        with st.expander("📚 自定义术语词表（可选）", expanded=False):
+            st.caption("每行一个术语，注入 ASR 提升专有名词识别率。也可粘贴 CSV（逗号或换行分隔）。")
+
+            if "terms_raw" not in st.session_state:
+                st.session_state.terms_raw = ""
+
+            terms_raw = st.text_area(
+                "术语列表",
+                value=st.session_state.terms_raw,
                 height=120,
-            )
-
-            # Token 估算警告
-            if terms_text.strip():
-                chinese = sum(1 for c in terms_text if '一' <= c <= '鿿')
-                other = len(terms_text) - chinese
-                estimated_tokens = int(chinese * 2.0 + other * 0.5)
-                if estimated_tokens > 200:
-                    st.warning(
-                        f"⚠️ 词表约 {estimated_tokens} token，已超过 200 token 限制，"
-                        "超出部分将在识别时自动截断"
-                    )
-                elif estimated_tokens > 50:
-                    st.caption(f"💡 词表共估算约 {estimated_tokens} token（上限 200 token）")
-
-            # CSV 导入
-            csv_file = st.file_uploader(
-                "从 CSV 导入词表",
-                type=["csv"],
-                key="terms_csv",
+                placeholder="例：\n量子纠缠\nTransformer\n李明（项目负责人）",
                 label_visibility="collapsed",
+                key="terms_textarea",
             )
-            if csv_file:
-                c_csv1, c_csv2 = st.columns([3, 1])
-                with c_csv1:
-                    st.caption(f"已选择：{csv_file.name}")
-                with c_csv2:
-                    if st.button("📥 导入并覆盖词表", key="btn_import_csv"):
-                        try:
-                            content = csv_file.getvalue().decode("utf-8", errors="ignore")
-                            lines = [ln.strip() for ln in content.replace("\r\n", "\n").split("\n") if ln.strip()]
-                            new_terms = []
-                            for line in lines:
-                                new_terms.extend([t.strip() for t in line.split(",") if t.strip()])
-                            if new_terms:
-                                st.session_state.pending_csv_terms = "\n".join(new_terms)
-                                st.rerun()
-                            else:
-                                st.warning("CSV 中未识别到有效词条")
-                        except Exception as e:
-                            st.warning(f"CSV 解析失败：{e}")
+            st.session_state.terms_raw = terms_raw
 
-            st.divider()
+            # 解析并估算 token
+            raw_terms = [
+                t.strip()
+                for part in terms_raw.replace(",", "\n").replace("，", "\n").splitlines()
+                for t in [part.strip()] if t.strip()
+            ]
+            if raw_terms:
+                kept, truncated = truncate_terms(raw_terms)
+                total_tok = sum(_estimate_tokens(t) + 1 for t in kept)
+                if truncated:
+                    st.warning(
+                        f"⚠️ 词表超出 200 token 限制，已自动截断至前 {len(kept)} 条"
+                        f"（共 ~{total_tok} token）。超出部分不会注入 ASR。"
+                    )
+                else:
+                    st.caption(f"✓ {len(kept)} 条术语，约 {total_tok} token（上限 200）")
+            else:
+                kept = []
 
+        # ── 测试功能：原始文本 & 错词率对比 ─────────────────────────────────
+        with st.expander("🧪 测试功能：转录错词率对比（仅供测试，后续将删除）", expanded=False):
+            st.warning(
+                "⚠️ **测试专用功能**：填入原始文本后，点击「测试转录」将只运行 ASR 并计算错词率，"
+                "**不会**生成会议纪要、不保存数据库。"
+            )
+            ref_mode = st.radio(
+                "参考文本来源",
+                ["手动输入", "上传 TextGrid 文件"],
+                horizontal=True,
+                key="ref_mode_selector",
+            )
+            if ref_mode == "手动输入":
+                st.text_area(
+                    "原始转录文本（参考文本）",
+                    height=120,
+                    placeholder="请粘贴音频对应的准确文本，用于计算字符错误率（CER）……",
+                    key="ref_text_input",
+                )
+            else:
+                uploaded_tg = st.file_uploader(
+                    "TextGrid 文件",
+                    type=["TextGrid"],
+                    key="ref_textgrid_upload",
+                    label_visibility="collapsed",
+                )
+                if uploaded_tg is not None:
+                    _tg_content = uploaded_tg.read().decode("utf-8", errors="replace")
+                    _parsed_tg = _parse_textgrid(_tg_content)
+                    st.session_state["_tg_ref_text"] = _parsed_tg
+                    st.caption(f"✓ 已解析 **{uploaded_tg.name}**，共 {len(_parsed_tg)} 字符")
+                    st.text_area(
+                        "解析结果预览",
+                        value=_parsed_tg[:400] + ("…" if len(_parsed_tg) > 400 else ""),
+                        height=80,
+                        disabled=True,
+                        key="tg_preview",
+                    )
+                else:
+                    st.session_state.pop("_tg_ref_text", None)
+                    st.caption("请上传 .TextGrid 文件，将自动解析所有标注文本作为参考文本")
+
+        with st.expander("▸ 高级选项", expanded=False):
             tf = st.file_uploader(
                 "自定义模板（可选）",
                 type=["docx", "md", "pdf"],
@@ -188,10 +292,15 @@ def page_upload():
                 st.session_state.template_path = tpl_path
                 st.caption(f"已加载模板：{tf.name}")
 
-        disabled = not uploaded or (
+        _ref_mode = st.session_state.get("ref_mode_selector", "手动输入")
+        if _ref_mode == "手动输入":
+            _ref_text = st.session_state.get("ref_text_input", "").strip()
+        else:
+            _ref_text = st.session_state.get("_tg_ref_text", "")
+        disabled = not _has_file or (
             selected_scene == _CUSTOM_SCENE and not st.session_state.custom_headings
         )
-        cols = st.columns([3, 1])
+        cols = st.columns([2, 2, 1])
         with cols[0]:
             clicked = st.button(
                 "🚀 开始生成会议纪要",
@@ -201,32 +310,57 @@ def page_upload():
                 key="btn_generate",
             )
         with cols[1]:
-            st.caption("⏱ 预计约 2 分钟")
+            clicked_test = st.button(
+                "🧪 测试转录",
+                type="secondary",
+                width='stretch',
+                disabled=not _has_file,
+                key="btn_test_asr",
+                help="仅运行 ASR，与原始文本对比错词率，不生成纪要",
+            )
+        with cols[2]:
+            if _ref_text:
+                st.caption("✓ 有参考文本")
+            else:
+                st.caption("⏱ 预计约 2 分钟")
 
-    if not clicked:
+    if not clicked and not clicked_test:
         return
 
-    # ---------- 处理流程 ----------
+    # ---------- 公共准备 ----------
     reset_result()
     fs = FileService()
     db = MeetingRepository()
     svc = MeetingService(db)
 
-    ext = Path(uploaded.name).suffix.lower()
-    file_path, file_hash = fs.save_uploaded(
-        uploaded,
-        "video" if ext in config.ALLOWED_VIDEO_EXTENSIONS else "audio",
-    )
+    # 文件路径从 session_state 读取（已在上传时保存，不依赖 uploaded 对象是否仍有效）
+    file_path = st.session_state["_saved_file_path"]
+    file_hash = st.session_state["_saved_file_hash"]
+    ext = st.session_state["_saved_file_ext"]
     file_path = fs.prepare_audio_path(file_path, ext)
     meeting_dt = datetime.combine(meeting_date, meeting_time)
 
-    # 收集场景参数（"自定义模板"在后端等价于通用会议+自定义标题）
+    # 收集场景参数
     is_custom = selected_scene == "自定义模板"
     scene_to_use = PromptTemplateLoader.DEFAULT_SCENE if is_custom else selected_scene
     custom_headings = st.session_state.get("custom_headings") or None
 
+    # 收集术语词表（已在表单中完成截断，这里直接使用 kept）
+    terms_to_use = kept if kept else None
+
+    # ── 测试模式：仅 ASR + CER 对比 ─────────────────────────────────────────
+    if clicked_test:
+        _ref_mode = st.session_state.get("ref_mode_selector", "手动输入")
+        if _ref_mode == "手动输入":
+            _test_ref_text = st.session_state.get("ref_text_input", "").strip()
+        else:
+            _test_ref_text = st.session_state.get("_tg_ref_text", "")
+        _run_asr_test(file_path, asr_model, terms_to_use, transcription_mode, _test_ref_text)
+        return
+
     # 进度 UI 区
     st.divider()
+    st.caption(f"🤖 ASR 模型：**{asr_model}**" + (f"  |  📚 术语词表：{len(terms_to_use)} 条" if terms_to_use else ""))
     status_text = st.empty()
     status_text.markdown("**⏳ 正在加载语音识别模型...**")
     progress_bar = st.progress(0)
@@ -253,10 +387,6 @@ def page_upload():
     import time as _time
     asr_wall_start = _time.time()
 
-    # 收集术语词表
-    terms_text = st.session_state.get("pending_csv_terms") or st.session_state.get("terms_textarea", "")
-    terms_list = [t.strip() for t in terms_text.split("\n") if t.strip()] if terms_text else None
-
     try:
         result = None
         for event in svc.process_stream(
@@ -267,9 +397,12 @@ def page_upload():
             output_format=output_format,
             template_path=st.session_state.get("template_path"),
             progress_callback=on_progress,
-            terms=terms_list,
             scene=scene_to_use,
             custom_headings=custom_headings,
+            asr_model=asr_model,
+            terms=terms_to_use,
+            chunk_strategy=chunk_strategy_label,
+            transcription_mode=transcription_mode,
         ):
             if event["type"] == "segment":
                 pct = event["progress"]["pct"]
@@ -315,3 +448,135 @@ def page_upload():
     st.session_state.output_path = result.get("output_path")
     st.session_state.page = "result"
     st.rerun()
+
+
+# ── 测试功能：ASR 转录 + CER 对比（后续将删除）────────────────────────────────
+
+def _normalize_for_cer(text: str) -> str:
+    """去标点空格，保留汉字+字母数字（小写），用于 CER 计算"""
+    return re.sub(r"[^一-鿿a-z0-9]", "", text.lower())
+
+
+def _calculate_cer(reference: str, hypothesis: str) -> float:
+    ref = _normalize_for_cer(reference)
+    hyp = _normalize_for_cer(hypothesis)
+    if not ref:
+        return 0.0
+    # Levenshtein 编辑距离（字符级）
+    n, m = len(ref), len(hyp)
+    dp = list(range(m + 1))
+    for i in range(1, n + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, m + 1):
+            prev, dp[j] = dp[j], min(
+                prev + (0 if ref[i - 1] == hyp[j - 1] else 1),
+                dp[j] + 1, dp[j - 1] + 1,
+            )
+    return dp[m] / n
+
+
+def _build_diff_html(reference: str, hypothesis: str) -> str:
+    """对比 hypothesis 与 reference，将 hypothesis 中不匹配的字符标红，返回 HTML"""
+    ref_chars = list(reference)
+    hyp_chars = list(hypothesis)
+    matcher = difflib.SequenceMatcher(None, ref_chars, hyp_chars, autojunk=False)
+    parts = []
+    for op, _, _, j1, j2 in matcher.get_opcodes():
+        chunk = html.escape("".join(hyp_chars[j1:j2]))
+        if op == "equal":
+            parts.append(chunk)
+        else:
+            parts.append(f'<span style="color:#EF4444;background:#FEF2F2">{chunk}</span>')
+    return "".join(parts)
+
+
+def _parse_textgrid(content: str) -> str:
+    """从 Praat TextGrid 文件内容中按顺序提取所有 interval 的 text，拼接为完整参考文本"""
+    texts = re.findall(r'text\s*=\s*"([^"]*)"', content)
+    return "".join(t for t in texts if t.strip())
+
+
+def _run_asr_test(file_path: str, asr_model: str, terms: list | None,
+                  transcription_mode: str, ref_text: str = ""):
+    """测试专用：仅运行 ASR，展示转录结果并（若有参考文本）计算 CER"""
+
+    st.divider()
+    st.markdown(
+        "### 🧪 转录测试结果\n"
+        '<span style="color:#6B7280;font-size:12px">⚠️ 测试功能，仅供转录评估，不生成会议纪要，不保存数据库</span>',
+        unsafe_allow_html=True,
+    )
+
+    status = st.empty()
+    status.markdown("**⏳ 正在加载模型并转写...**")
+    prog = st.progress(0)
+
+    try:
+        if asr_model == ASR_MODEL_SENSEVOICE:
+            from engines.sense_voice_engine import get_sensevoice_engine
+            engine = get_sensevoice_engine()
+        else:
+            from engines.asr_engine import get_asr_engine
+            engine = get_asr_engine()
+
+        t0 = _time.time()
+        if transcription_mode == "parallel":
+            segments = []
+            for event in engine.transcribe_parallel_iter(file_path, terms=terms):
+                if event["type"] == "chunk_done":
+                    prog.progress(min(int(event["completed"] / max(event["total"], 1) * 90), 90))
+                elif event["type"] == "complete":
+                    segments = event["segments"]
+        else:
+            segments = []
+            for seg, _ in engine.transcribe_iter(file_path, terms=terms):
+                segments.append(seg)
+                prog.progress(min(len(segments) * 5, 90))
+
+        asr_time = _time.time() - t0
+        hyp_text = " ".join(seg.get("text", "") for seg in segments)
+
+    except Exception as e:
+        status.error(f"转写失败：{e}")
+        prog.empty()
+        return
+
+    prog.progress(100)
+
+    # ── 展示 ──────────────────────────────────────────────────────────────────
+    if ref_text:
+        cer = _calculate_cer(ref_text, hyp_text)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("字符错误率（CER）", f"{cer * 100:.2f}%")
+        with c2:
+            st.metric("转写耗时", f"{asr_time:.1f}s")
+
+        status.success(f"✅ 转写完成  |  CER {cer*100:.2f}%  |  耗时 {asr_time:.1f}s")
+
+        col_ref, col_hyp = st.columns(2, gap="medium")
+        with col_ref:
+            st.markdown("**📄 原始文本（参考）**")
+            st.markdown(
+                f'<div style="background:#F8FAFC;padding:12px;border-radius:6px;'
+                f'font-size:14px;line-height:1.8;border:1px solid #E2E8F0;'
+                f'max-height:400px;overflow-y:auto">'
+                f'{html.escape(ref_text)}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_hyp:
+            st.markdown(f"**🎤 转录结果（{asr_model}）**")
+            diff_html = _build_diff_html(ref_text, hyp_text)
+            st.markdown(
+                f'<div style="background:#F8FAFC;padding:12px;border-radius:6px;'
+                f'font-size:14px;line-height:1.8;border:1px solid #E2E8F0;'
+                f'max-height:400px;overflow-y:auto">'
+                f'{diff_html}</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption("🔴 红色文字 = 与参考文本不一致")
+    else:
+        status.success(f"✅ 转写完成  |  耗时 {asr_time:.1f}s（未提供参考文本，不计算 CER）")
+        st.metric("转写耗时", f"{asr_time:.1f}s")
+        st.markdown("**🎤 转录结果**")
+        st.text_area("转录全文", value=hyp_text, height=200, disabled=True, key="test_hyp_out")
