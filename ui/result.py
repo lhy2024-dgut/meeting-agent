@@ -513,9 +513,7 @@ def _render_collapsible_minutes(raw_md: str):
     show_full = st.session_state.get(_EXPAND_KEY, False)
 
     if len(raw_md) > max_preview and not show_full:
-        preview = raw_md[:max_preview] + "
-
-> *全文较長，点击下方按钮查看完整内容*"
+        preview = raw_md[:max_preview] + "\n\n> *全文较长，点击下方按钮查看完整内容*"
         st.markdown(
             f'<div class="minutes-paper">{_md_to_html(preview)}</div>',
             unsafe_allow_html=True,
