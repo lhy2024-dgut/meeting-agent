@@ -22,3 +22,10 @@ jieba
 torch
 # Reranker 依赖（transformers 底层需要 torch，faster-whisper 已传递安装）
 # 如未安装: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# SenseVoiceSmall (FunASR)
+funasr
+modelscope
+torchaudio
+more-itertools
+# WER/CER 测试
+jiwer

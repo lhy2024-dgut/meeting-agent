@@ -7,14 +7,18 @@ import yaml
 
 from chains.minutes_chain import MinutesChain
 from chains.export_chain import ExportChain
-from engines.asr_engine import ASREngine, _get_audio_duration, _PARALLEL_MIN_SEC
+from engines.asr_engine import ASREngine, get_asr_engine, _get_audio_duration, _PARALLEL_MIN_SEC
 from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
+from services.terms_service import save_terms
 
 logger = get_logger(__name__)
 
 _FALLBACK_TRANSCRIPT_LEN = 4000
+
+ASR_MODEL_WHISPER = "faster-whisper"
+ASR_MODEL_SENSEVOICE = "SenseVoiceSmall"
 
 
 class MeetingService:
@@ -23,14 +27,24 @@ class MeetingService:
     def __init__(self, db_repo, asr_engine=None, minutes_chain=None, export_chain=None):
         self.db = db_repo
         self._asr = asr_engine
+        self._sv_engine = None
         self.minutes_chain = minutes_chain or MinutesChain()
         self.export_chain = export_chain or ExportChain()
 
     @property
     def asr(self):
         if self._asr is None:
-            self._asr = ASREngine()
+            self._asr = get_asr_engine()   # 返回模块级单例，不重复加载模型
         return self._asr
+
+    def _get_engine(self, asr_model: str):
+        """根据 asr_model 名称返回对应引擎单例"""
+        if asr_model == ASR_MODEL_SENSEVOICE:
+            if self._sv_engine is None:
+                from engines.sense_voice_engine import get_sensevoice_engine
+                self._sv_engine = get_sensevoice_engine()  # 模块级单例
+            return self._sv_engine
+        return self.asr
 
     # ------------------------------------------------------------------
     # Public API
@@ -47,6 +61,9 @@ class MeetingService:
         progress_callback=None,
         scene="通用会议",
         custom_headings=None,
+        asr_model=ASR_MODEL_WHISPER,
+        terms=None,
+        chunk_strategy=None,
     ):
         """批量处理：ASR → 分类 → LLM → 持久化 → RAG → 导出"""
         cached = self.db.get_meeting_by_hash(file_hash)
@@ -55,15 +72,17 @@ class MeetingService:
         ):
             return self._handle_cache_hit(cached, output_format, template_path, progress_callback)
 
+        engine = self._get_engine(asr_model)
         if progress_callback:
             progress_callback(10, "🎤 语音识别中...")
-        segments, duration = self.asr.transcribe(file_path)
+        segments, _ = engine.transcribe(file_path, terms=terms)
         transcript = " ".join(seg.get("text", "") for seg in segments)
 
         return self._finalize(
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
-            scene=scene, custom_headings=custom_headings,
+            scene=scene, custom_headings=custom_headings, terms=terms,
+            chunk_strategy=chunk_strategy, asr_model=asr_model,
         )
 
     def process_stream(
@@ -77,20 +96,36 @@ class MeetingService:
         progress_callback=None,
         scene="通用会议",
         custom_headings=None,
+        asr_model=ASR_MODEL_WHISPER,
+        terms=None,
+        chunk_strategy=None,
+        transcription_mode="auto",
     ):
-        """流式处理：边转写边返回结果；长音频自动切换并行模式"""
+        """流式处理：边转写边返回结果
+
+        transcription_mode:
+          "auto"     — 按时长自动选择（≥90s 并行，否则直接）
+          "direct"   — 强制直接转写
+          "parallel" — 强制并行转写
+        """
+        engine = self._get_engine(asr_model)
         asr_start = time.time()
 
         duration_s = _get_audio_duration(file_path)
-        use_parallel = duration_s >= _PARALLEL_MIN_SEC
+        if transcription_mode == "parallel":
+            use_parallel = True
+        elif transcription_mode == "direct":
+            use_parallel = False
+        else:
+            use_parallel = duration_s >= _PARALLEL_MIN_SEC
 
         if use_parallel:
             segments = []
-            for event in self.asr.transcribe_parallel_iter(file_path):
+            for event in engine.transcribe_parallel_iter(file_path, terms=terms):
                 if event["type"] == "chunk_done":
                     elapsed = time.time() - asr_start
                     msg = (
-                        f"🎤 并行转写... [{event['completed']}/{event['total']} 片段完成]"
+                        f"🎤 [{asr_model}] 并行转写... [{event['completed']}/{event['total']} 片段完成]"
                         f"  ⏱ {elapsed:.0f}s"
                     )
                     if progress_callback:
@@ -102,13 +137,13 @@ class MeetingService:
             transcript = " ".join(seg.get("text", "") for seg in segments)
         else:
             progress = {"pct": 0, "msg": "", "segments": [], "transcript_parts": []}
-            for item, duration in self.asr.transcribe_iter(file_path):
+            for item, duration in engine.transcribe_iter(file_path, terms=terms):
                 progress["segments"].append(item)
                 progress["transcript_parts"].append(item.get("text", ""))
                 elapsed = time.time() - asr_start
                 progress["pct"] = min(55, int(item["end"] / max(duration, 1) * 55))
                 progress["msg"] = (
-                    f"🎤 实时转写... [{item['end']:.0f}s / {duration:.0f}s]"
+                    f"🎤 [{asr_model}] 转写... [{item['end']:.0f}s / {duration:.0f}s]"
                     f"  ⏱ {elapsed:.0f}s"
                 )
                 if progress_callback:
@@ -122,7 +157,8 @@ class MeetingService:
         final = self._finalize(
             segments, transcript, file_path, file_hash, title, meeting_dt,
             output_format, template_path, progress_callback,
-            scene=scene, custom_headings=custom_headings,
+            scene=scene, custom_headings=custom_headings, terms=terms,
+            chunk_strategy=chunk_strategy, asr_model=asr_model,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -187,9 +223,12 @@ class MeetingService:
         progress_callback=None,
         scene="通用会议",
         custom_headings=None,
+        terms=None,
+        chunk_strategy=None,
+        asr_model=None,
     ):
         """Steps 3-7: 分类 → LLM 提取 → 持久化 → RAG 索引 → 导出"""
-        # Step 3: 分类（仅基于客观时长，environment 存 "unknown" 等后续 speaker diarization）
+        # Step 3: 分类
         if progress_callback:
             progress_callback(55, "📊 分析会议特征...")
         duration = max((seg.get("end", 0) for seg in segments), default=0)
@@ -198,6 +237,13 @@ class MeetingService:
         meeting_id = self.db.create_meeting(
             title, file_path, duration_category, environment, file_hash
         )
+
+        # 保存术语词表（如有）
+        if terms:
+            try:
+                save_terms(meeting_id, terms)
+            except Exception as e:
+                logger.warning("保存术语词表失败: %s", e)
 
         # Step 4: LLM 提取
         if progress_callback:
@@ -248,6 +294,9 @@ class MeetingService:
                 minutes=minutes,
                 action_items=action_items,
                 resolutions=resolutions,
+                chunk_strategy=chunk_strategy,
+                segments=segments,
+                asr_model=asr_model or ASR_MODEL_WHISPER,
             )
         except Exception as e:
             logger.warning("RAG 索引重建失败，已保留旧索引: %s", e)

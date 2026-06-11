@@ -1,7 +1,6 @@
 """BM25 索引 — 基于 jieba 分词 + rank_bm25 的应用层全文检索"""
 
 import jieba
-from rank_bm25 import BM25Okapi
 
 from logger import get_logger
 
@@ -29,7 +28,7 @@ class BM25Index:
         # chunk_id → {"meeting_id", "chunk_type", "chunk_index", "text", "tokens"}
         self._docs: dict[int, dict] = {}
         # 当前 BM25 实例（脏标记法，add/remove 后置 None 重建）
-        self._bm25: BM25Okapi | None = None
+        self._bm25 = None  # rank_bm25 懒加载，避免未安装时整模块报错
         self._doc_ids: list[int] = []  # 与 BM25 语料库对齐的 id 列表
 
     def add_documents(self, meeting_id: int, chunks: list[dict]):
@@ -88,6 +87,7 @@ class BM25Index:
             scores = bm25.get_scores(query_tokens)
         else:
             # 构建子语料 BM25（仅含过滤后的文档）
+            from rank_bm25 import BM25Okapi
             sub_corpus = [self._docs[cid]["tokens"] for cid in filtered_ids]
             sub_bm25 = BM25Okapi(sub_corpus)
             scores = sub_bm25.get_scores(query_tokens)
@@ -157,6 +157,7 @@ class BM25Index:
     def _get_bm25(self):
         """懒加载 BM25 实例，索引变更后自动重建"""
         if self._bm25 is None:
+            from rank_bm25 import BM25Okapi
             self._doc_ids = list(self._docs.keys())
             corpus = [self._docs[cid]["tokens"] for cid in self._doc_ids]
             self._bm25 = BM25Okapi(corpus)

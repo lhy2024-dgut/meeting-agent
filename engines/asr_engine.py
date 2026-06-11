@@ -15,6 +15,30 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
+# ── Resolve ffmpeg / ffprobe executables ─────────────────────────────────────
+# On Windows the subprocess PATH may differ from the shell PATH.
+# We probe shutil.which() first, then fall back to common install directories.
+def _find_exe(name: str) -> str:
+    found = shutil.which(name)
+    if found:
+        return found
+    _CANDIDATES = [
+        r"D:\ffmpeg\bin",
+        r"C:\ffmpeg\bin",
+        r"C:\Program Files\ffmpeg\bin",
+        r"C:\ProgramData\chocolatey\bin",
+    ]
+    for d in _CANDIDATES:
+        p = os.path.join(d, name + ".exe")
+        if os.path.isfile(p):
+            return p
+    return name  # last resort: let subprocess raise a clear error
+
+
+_FFMPEG  = _find_exe("ffmpeg")
+_FFPROBE = _find_exe("ffprobe")
+logger.info("ffmpeg: %s  ffprobe: %s", _FFMPEG, _FFPROBE)
+
 # ── Parallel chunking constants ──────────────────────────────────────────────
 _PARALLEL_MIN_SEC  = 90    # use parallel only when audio exceeds this duration
 _MAX_CHUNK_SEC     = 60    # each chunk is at most this long
@@ -22,13 +46,43 @@ _MIN_SILENCE_MS    = 500   # detect silence gaps of at least this length
 _SILENCE_THRESH_DB = -40   # dBFS threshold for silence detection
 _MAX_WORKERS       = 4     # cap parallelism regardless of CPU count
 
+# ── Hallucination detection ──────────────────────────────────────────────────
+# Whisper echoes initial_prompt phrases during silence, and loops single tokens
+# when condition_on_previous_text=True causes runaway self-conditioning.
+
+_HALLUCINATION_PHRASES = [
+    "请使用简体中文输出",
+    "以下是普通话会议录音",
+    "本次会议涉及以下专有名词",
+    "字幕由",
+    "感谢收看",
+    "请订阅",
+]
+
+
+def _is_segment_hallucination(text: str) -> bool:
+    """Return True if a segment matches a known Whisper hallucination pattern."""
+    t = text.strip()
+    if not t:
+        return True
+    for phrase in _HALLUCINATION_PHRASES:
+        if phrase in t:
+            return True
+    # Repetition loop: any 1–4 char unit repeated 5+ times consecutively
+    clean = re.sub(r'[\s,，。！？、；：""\'\'「」【】]', '', t)
+    if len(clean) >= 5:
+        for unit_len in range(1, 5):
+            if re.search(r'(.{' + str(unit_len) + r'})\1{4,}', clean):
+                return True
+    return False
+
 
 def _detect_silence_ffmpeg(audio_path: str, min_silence_ms: int, thresh_db: int) -> list:
     """Return list of (start_s, end_s) silence intervals via ffmpeg silencedetect."""
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-i", audio_path,
+                _FFMPEG, "-i", audio_path,
                 "-af", f"silencedetect=noise={thresh_db}dB:d={min_silence_ms / 1000:.3f}",
                 "-f", "null", "-",
             ],
@@ -80,7 +134,7 @@ def _split_audio_ffmpeg(audio_path: str, duration_s: float) -> tuple:
         out_path = os.path.join(tmpdir, f"chunk_{idx:03d}.wav")
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", audio_path,
+                _FFMPEG, "-y", "-i", audio_path,
                 "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
                 "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
                 out_path,
@@ -124,7 +178,7 @@ def _get_audio_duration(audio_path: str) -> float:
     """Get audio duration in seconds via a single fast ffprobe call (no loudness analysis)."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", audio_path],
+            [_FFPROBE, "-v", "quiet", "-print_format", "json", "-show_format", audio_path],
             capture_output=True, text=True, timeout=10,
         )
         info = json.loads(result.stdout)
@@ -139,7 +193,7 @@ def _get_audio_info(audio_path):
     try:
         result = subprocess.run(
             [
-                "ffprobe",
+                _FFPROBE,
                 "-v", "quiet",
                 "-print_format", "json",
                 "-show_format",
@@ -164,7 +218,7 @@ def _get_audio_info(audio_path):
             try:
                 loud_result = subprocess.run(
                     [
-                        "ffprobe",
+                        _FFPROBE,
                         "-v", "quiet",
                         "-print_format", "json",
                         "-show_entries",
@@ -228,35 +282,46 @@ class ASREngine:
             "timestamp": time.time(),
         }
 
-    def transcribe_iter(self, audio_path, progress_callback=None):
+    @staticmethod
+    def _build_initial_prompt(terms: list | None) -> str:
+        base = "以下是普通话会议录音，请使用简体中文输出。"
+        if not terms:
+            return base
+        terms_str = "，".join(t.strip() for t in terms if t.strip())
+        return f"{base}本次会议涉及以下专有术语，请优先识别：{terms_str}。"
+
+    def transcribe_iter(self, audio_path, progress_callback=None, terms=None):
         duration_sec = _get_audio_duration(audio_path)
         beam_size = self._get_beam_size(duration_sec)
+        prompt = self._build_initial_prompt(terms)
 
         segments_raw, info = self.model.transcribe(
             audio_path,
             language=config.WHISPER_LANGUAGE,
             beam_size=beam_size,
-            vad_filter=False,
-            condition_on_previous_text=True,
-            initial_prompt="以下是普通话会议录音，请使用简体中文输出。",
+            vad_filter=True,
+            condition_on_previous_text=False,
+            initial_prompt=prompt,
         )
 
         total_est = int(info.duration / 5) + 1
         for idx, seg in enumerate(segments_raw):
             item = self._build_segment(idx, seg)
+            if _is_segment_hallucination(item["text"]):
+                continue
             if progress_callback:
                 progress_callback(idx + 1, total_est)
             yield item, info.duration
 
-    def transcribe(self, audio_path, progress_callback=None):
+    def transcribe(self, audio_path, progress_callback=None, terms=None):
         segments = []
         duration = 0.0
-        for item, dur in self.transcribe_iter(audio_path, progress_callback):
+        for item, dur in self.transcribe_iter(audio_path, progress_callback, terms):
             segments.append(item)
             duration = dur
         return segments, duration
 
-    def transcribe_parallel_iter(self, audio_path):
+    def transcribe_parallel_iter(self, audio_path, terms=None):
         """Parallel chunked transcription for long audio.
 
         Yields dicts:
@@ -269,12 +334,13 @@ class ASREngine:
         n_workers = min(multiprocessing.cpu_count(), n, _MAX_WORKERS)
         logger.info("并行转写：%d 块，%d 进程", n, n_workers)
 
+        prompt = self._build_initial_prompt(terms)
         tasks = [
             (
                 c["index"], c["path"], c["start_s"],
                 config.WHISPER_MODEL, config.WHISPER_DEVICE,
                 config.WHISPER_COMPUTE_TYPE, config.WHISPER_LANGUAGE,
-                "以下是普通话会议录音，请使用简体中文输出。",
+                prompt,
             )
             for c in chunks
         ]
@@ -303,6 +369,8 @@ class ASREngine:
             r = results[idx]
             if r["success"]:
                 all_segments.extend(r["segments"])
+        # 幻觉过滤集中在汇总阶段做一次，worker 不重复过滤
+        all_segments = [s for s in all_segments if not _is_segment_hallucination(s["text"])]
         all_segments.sort(key=lambda s: s["start"])
         yield {"type": "complete", "segments": all_segments}
 
@@ -317,3 +385,16 @@ class ASREngine:
     @staticmethod
     def classify_meeting_type(duration, num_speakers, noise_level):
         return ASREngine.classify_duration(duration), "unknown"
+
+
+# ── 模块级单例（避免每次重复加载 WhisperModel）───────────────────────────────────
+
+_asr_engine_instance: ASREngine | None = None
+
+
+def get_asr_engine() -> ASREngine:
+    """返回 ASREngine 单例，WhisperModel 只加载一次"""
+    global _asr_engine_instance
+    if _asr_engine_instance is None:
+        _asr_engine_instance = ASREngine()
+    return _asr_engine_instance
