@@ -1,6 +1,12 @@
 import json
+import multiprocessing
+import os
+import re
+import shutil
 import subprocess
+import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from faster_whisper import WhisperModel
 
@@ -8,6 +14,124 @@ import config
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+# ── Parallel chunking constants ──────────────────────────────────────────────
+_PARALLEL_MIN_SEC  = 90    # use parallel only when audio exceeds this duration
+_MAX_CHUNK_SEC     = 60    # each chunk is at most this long
+_MIN_SILENCE_MS    = 500   # detect silence gaps of at least this length
+_SILENCE_THRESH_DB = -40   # dBFS threshold for silence detection
+_MAX_WORKERS       = 4     # cap parallelism regardless of CPU count
+
+
+def _detect_silence_ffmpeg(audio_path: str, min_silence_ms: int, thresh_db: int) -> list:
+    """Return list of (start_s, end_s) silence intervals via ffmpeg silencedetect."""
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", audio_path,
+                "-af", f"silencedetect=noise={thresh_db}dB:d={min_silence_ms / 1000:.3f}",
+                "-f", "null", "-",
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        starts, silences = [], []
+        for line in result.stderr.splitlines():
+            m_start = re.search(r"silence_start:\s*([\d.]+)", line)
+            m_end   = re.search(r"silence_end:\s*([\d.]+)", line)
+            if m_start:
+                starts.append(float(m_start.group(1)))
+            if m_end and starts:
+                silences.append((starts.pop(0), float(m_end.group(1))))
+        return silences
+    except Exception as e:
+        logger.warning("silencedetect 失败: %s", e)
+        return []
+
+
+def _split_audio_ffmpeg(audio_path: str, duration_s: float) -> tuple:
+    """Split audio at silence boundaries into temp WAV chunks.
+
+    Returns (chunk_list, tmpdir) where chunk_list is
+    [{"index": int, "path": str, "start_s": float, "end_s": float}, ...].
+    Caller must delete tmpdir when done.
+    """
+    silences = _detect_silence_ffmpeg(audio_path, _MIN_SILENCE_MS, _SILENCE_THRESH_DB)
+
+    # Build candidate cut points from silence midpoints
+    cut_points = [0.0]
+    for s_start, s_end in silences:
+        cut_points.append((s_start + s_end) / 2.0)
+    cut_points.append(duration_s)
+
+    # Merge into chunks that stay under _MAX_CHUNK_SEC
+    bounds: list[tuple[float, float]] = []
+    chunk_start = 0.0
+    for i in range(1, len(cut_points)):
+        if cut_points[i] - chunk_start >= _MAX_CHUNK_SEC or i == len(cut_points) - 1:
+            bounds.append((chunk_start, cut_points[i]))
+            chunk_start = cut_points[i]
+
+    if not bounds:
+        bounds = [(0.0, duration_s)]
+
+    tmpdir = tempfile.mkdtemp(prefix="asr_chunks_")
+    chunks = []
+    for idx, (start, end) in enumerate(bounds):
+        out_path = os.path.join(tmpdir, f"chunk_{idx:03d}.wav")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", audio_path,
+                "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
+                "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
+                out_path,
+            ],
+            capture_output=True, check=True, timeout=60,
+        )
+        chunks.append({"index": idx, "path": out_path, "start_s": start, "end_s": end})
+
+    logger.info("音频切分为 %d 块，最长 %.1fs", len(chunks),
+                max(c["end_s"] - c["start_s"] for c in chunks))
+    return chunks, tmpdir
+
+
+def _transcribe_chunk_worker(args: tuple) -> dict:
+    """Top-level worker executed in a subprocess — must stay at module level for pickling."""
+    chunk_index, chunk_path, start_offset_s, model_name, device, compute_type, language, prompt = args
+    try:
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        segments_gen, _ = model.transcribe(
+            chunk_path,
+            language=language,
+            beam_size=5,
+            initial_prompt=prompt,
+        )
+        segments = []
+        for seg in segments_gen:
+            segments.append({
+                "id":        seg.id,
+                "text":      seg.text.strip(),
+                "start":     seg.start + start_offset_s,
+                "end":       seg.end   + start_offset_s,
+                "duration":  seg.end - seg.start,
+                "timestamp": time.time(),
+            })
+        return {"index": chunk_index, "segments": segments, "success": True}
+    except Exception as exc:
+        return {"index": chunk_index, "segments": [], "success": False, "error": str(exc)}
+
+
+def _get_audio_duration(audio_path: str) -> float:
+    """Get audio duration in seconds via a single fast ffprobe call (no loudness analysis)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", audio_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        info = json.loads(result.stdout)
+        return float(info.get("format", {}).get("duration", 0))
+    except Exception as e:
+        logger.warning("_get_audio_duration 失败: %s", e)
+        return 0.0
 
 
 def _get_audio_info(audio_path):
@@ -129,8 +253,9 @@ class ASREngine:
             "timestamp": time.time(),
         }
 
+
     def transcribe_iter(self, audio_path, progress_callback=None, initial_prompt=None):
-        duration_sec, noise_level = _get_audio_info(audio_path)
+        duration_sec = _get_audio_duration(audio_path)
         beam_size = self._get_beam_size(duration_sec)
 
         segments_raw, info = self.model.transcribe(
@@ -139,7 +264,7 @@ class ASREngine:
             beam_size=beam_size,
             vad_filter=False,
             condition_on_previous_text=True,
-            initial_prompt=initial_prompt,
+            initial_prompt=initial_prompt or "以下是普通话会议录音，请使用简体中文输出。",
         )
 
         total_est = int(info.duration / 5) + 1
@@ -156,6 +281,56 @@ class ASREngine:
             segments.append(item)
             duration = dur
         return segments, duration
+
+    def transcribe_parallel_iter(self, audio_path):
+        """Parallel chunked transcription for long audio.
+
+        Yields dicts:
+          {"type": "chunk_done", "completed": int, "total": int, "pct": int}
+          {"type": "complete",   "segments": list}
+        """
+        duration_s = _get_audio_duration(audio_path)
+        chunks, tmpdir = _split_audio_ffmpeg(audio_path, duration_s or _PARALLEL_MIN_SEC)
+        n = len(chunks)
+        n_workers = min(multiprocessing.cpu_count(), n, _MAX_WORKERS)
+        logger.info("并行转写：%d 块，%d 进程", n, n_workers)
+
+        tasks = [
+            (
+                c["index"], c["path"], c["start_s"],
+                config.WHISPER_MODEL, config.WHISPER_DEVICE,
+                config.WHISPER_COMPUTE_TYPE, config.WHISPER_LANGUAGE,
+                "以下是普通话会议录音，请使用简体中文输出。",
+            )
+            for c in chunks
+        ]
+
+        results: dict = {}
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(_transcribe_chunk_worker, t): t[0] for t in tasks}
+                for future in as_completed(futures):
+                    r = future.result()
+                    results[r["index"]] = r
+                    completed = len(results)
+                    if not r["success"]:
+                        logger.warning("块 %d 转写失败: %s", r["index"], r.get("error"))
+                    yield {
+                        "type":      "chunk_done",
+                        "completed": completed,
+                        "total":     n,
+                        "pct":       int(completed / n * 55),
+                    }
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        all_segments = []
+        for idx in sorted(results.keys()):
+            r = results[idx]
+            if r["success"]:
+                all_segments.extend(r["segments"])
+        all_segments.sort(key=lambda s: s["start"])
+        yield {"type": "complete", "segments": all_segments}
 
     @staticmethod
     def classify_duration(duration):

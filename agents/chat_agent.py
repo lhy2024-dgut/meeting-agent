@@ -42,6 +42,7 @@ class ChatAgent:
         self.meeting_context = {}
         self._thread_id = str(uuid.uuid4())[:8]
         self._latest_rag_context = ""
+        self._latest_rag_results = []
         self._trimmed = False
         self._round_count = 0
 
@@ -84,19 +85,25 @@ class ChatAgent:
         self._trimmed = False
         self._round_count = 0
         self._latest_rag_context = ""
+        self._latest_rag_results = []
 
     def chat(self, user_message: str) -> str:
         """一问一答；每次自动走 MemorySaver 记录对话历史"""
-        # RAG 检索 — 每次依据最新问题取知识库
         try:
-            rag_context = get_retriever().build_context(
+            retriever = get_retriever()
+            results = retriever.search(
                 user_message,
                 top_k=5,
                 exclude_meeting_id=self.meeting_context.get("meeting_id"),
             )
+            self._latest_rag_results = retriever.enrich_results(results)
+            rag_context = retriever.build_context(
+                results=results,
+            )
         except Exception as e:
             logger.warning("RAG 检索失败: %s", e)
             rag_context = ""
+            self._latest_rag_results = []
         self._latest_rag_context = rag_context or "（暂无历史会议相关知识）"
 
         app = self._graph.compile(checkpointer=self._checkpointer)
@@ -116,6 +123,12 @@ class ChatAgent:
             "is_full": self._round_count >= self.MAX_ROUNDS,
             "trimmed": self._trimmed,
         }
+
+    def get_latest_rag_results(self) -> list:
+        """供前端展示历史会议引用来源。
+        每条含 meeting_title / chunk_type_label / text / score。
+        """
+        return self._latest_rag_results
 
     @staticmethod
     def validate_input(user_input: str) -> str | None:
@@ -151,11 +164,15 @@ class ChatAgent:
             f"会议纪要：{ctx.get('minutes', '')}\n"
             f"待办事项：{ctx.get('action_items', '')}\n"
             f"会议决议：{ctx.get('resolutions', '')}\n\n"
-            f"## 知识库检索结果（来自历史会议）\n"
+            f"## 历史会议检索结果（来自其他会议的知识库）\n"
             f"{self._latest_rag_context}\n\n"
-            f"请基于以上所有信息回答用户问题。优先使用当前会议信息；"
-            f"若问题涉及历史会议内容或需要跨会议对比，则使用知识库检索结果。"
-            f"要求：准确、简洁、不编造内容。"
+            f"回答规则（按优先级）：\n"
+            f"1. 优先依据当前会议内容回答用户问题。\n"
+            f"2. 若问题涉及历史背景、跨会议对比、之前的决议或项目延续信息，"
+            f'可参考"历史会议检索结果"。引用历史信息时，尽量说明来源会议。\n'
+            f"3. 若历史检索结果中没有足够依据，请明确告知"
+            f'“未在历史会议中找到相关信息”，不要编造。\n'
+            f"4. 回答应准确、简洁。"
         )
 
         # Separate system from conversation messages

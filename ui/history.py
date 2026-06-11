@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""历史会议页"""
+"""历史会议页 — 分页列表、摘要显示、项目名可编辑"""
 
 import streamlit as st
 
@@ -18,24 +18,13 @@ def page_history():
     st.header("历史会议")
 
     db = MeetingRepository()
-    meetings = db.get_all_meetings()
-
-    if not meetings:
-        empty_state(
-            "📚",
-            "暂无会议记录",
-            "上传处理第一场会议后，这里会展示所有历史记录",
-            action_label="🎤 上传会议",
-            action_key="history_empty_upload",
-        )
-        return
 
     # 筛选栏
     cols = st.columns([2, 1, 1])
     with cols[0]:
         search = st.text_input(
             "搜索",
-            placeholder="搜索会议标题...",
+            placeholder="搜索标题 / 摘要 / 项目名...",
             label_visibility="collapsed",
             key="history_search",
         )
@@ -54,58 +43,56 @@ def page_history():
             key="history_env",
         )
 
-    # 过滤
-    filtered = []
-    for m in meetings:
-        if search and search.lower() not in (m.title or "").lower():
-            continue
-        dur = m.duration_category or ""
-        if dur_filter == "短会 (<5min)" and dur != "short":
-            continue
-        if dur_filter == "中等 (5-30min)" and dur != "medium":
-            continue
-        if dur_filter == "长会 (>30min)" and dur != "long":
-            continue
-        env = m.environment or ""
-        if env_filter == "安静" and env != "quiet":
-            continue
-        if env_filter == "嘈杂" and env != "noisy":
-            continue
-        if env_filter == "多人" and env != "multi_speaker":
-            continue
-        filtered.append(m)
-
-    st.caption(f"共 {len(filtered)} / {len(meetings)} 场会议")
-
-    if not filtered:
-        st.info("未找到匹配的会议，请尝试其他筛选条件")
-        return
-
     # 分页
-    page_size = 5
+    page_size = 10
     page_key = "history_page"
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
-    total_pages = max(1, (len(filtered) + page_size - 1) // page_size)
-    page_start = st.session_state[page_key] * page_size
-    page_meetings = filtered[page_start : page_start + page_size]
+    page = st.session_state[page_key]
+
+    meetings, total = db.get_meetings_paginated(
+        page=page,
+        page_size=page_size,
+        search=search or "",
+        dur_filter=dur_filter,
+        env_filter=env_filter,
+    )
+
+    if total == 0:
+        empty_state(
+            "📚",
+            "暂无会议记录" if not search else "未找到匹配的会议",
+            "上传处理第一场会议后，这里会展示所有历史记录" if not search else "请尝试其他筛选条件",
+            action_label="🎤 上传会议",
+            action_key="history_empty_upload",
+        )
+        return
+
+    st.caption(f"共 {total} 场会议 · 第 {page + 1}/{max(1, (total + page_size - 1) // page_size)} 页")
 
     # 会议卡片列表
-    for m in page_meetings:
+    for m in meetings:
         with st.container(border=True):
+            # 第一行: 标题 + 项目名 + 操作
             c1, c2 = st.columns([3, 1])
             with c1:
-                st.markdown(f"**{m.title or '未命名会议'}**")
-                ts = m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else ""
-                dur_label = config.DURATION_LABELS.get(m.duration_category, "")
-                env_label = config.ENV_LABELS.get(m.environment, "")
-                st.caption(f"{ts} · {dur_label} · {env_label}")
+                title_col, proj_col = st.columns([2, 1])
+                with title_col:
+                    st.markdown(f"**{m.title or '未命名会议'}**")
+                    ts = m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else ""
+                    dur_label = config.DURATION_LABELS.get(m.duration_category, "")
+                    env_label = config.ENV_LABELS.get(m.environment, "")
+                    st.caption(f"{ts} · {dur_label} · {env_label}")
+                with proj_col:
+                    _render_project_name(db, m)
 
                 # 摘要
-                if m.minutes_text:
-                    preview = m.minutes_text[:150].replace("\n", " ")
+                summary = m.short_summary
+                if not summary and m.minutes_text:
+                    summary = m.minutes_text[:200].replace("\n", " ")
+                if summary:
                     st.markdown(
-                        f'<div style="font-size:13px;color:#64748B;line-height:1.5">{preview}...</div>',
+                        f'<div style="font-size:13px;color:#64748B;line-height:1.5">{summary}</div>',
                         unsafe_allow_html=True,
                     )
 
@@ -144,19 +131,59 @@ def page_history():
                             st.rerun()
 
     # 分页导航
+    total_pages = max(1, (total + page_size - 1) // page_size)
     if total_pages > 1:
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
-            if st.button("← 上一页", disabled=st.session_state[page_key] == 0, width='stretch', type="secondary"):
-                st.session_state[page_key] = max(0, st.session_state[page_key] - 1)
+            if st.button("← 上一页", disabled=page == 0, width='stretch', type="secondary"):
+                st.session_state[page_key] = max(0, page - 1)
                 st.rerun()
         with col2:
             st.markdown(
                 f'<div style="text-align:center;color:#64748B;padding-top:0.5rem">'
-                f"{st.session_state[page_key] + 1} / {total_pages}</div>",
+                f"{page + 1} / {total_pages}</div>",
                 unsafe_allow_html=True,
             )
         with col3:
-            if st.button("下一页 →", disabled=st.session_state[page_key] >= total_pages - 1, width='stretch', type="secondary"):
-                st.session_state[page_key] = min(total_pages - 1, st.session_state[page_key] + 1)
+            if st.button("下一页 →", disabled=page >= total_pages - 1, width='stretch', type="secondary"):
+                st.session_state[page_key] = min(total_pages - 1, page + 1)
                 st.rerun()
+
+
+def _render_project_name(db: MeetingRepository, meeting):
+    """渲染项目名标签 + 编辑功能"""
+    project_name = meeting.project_name or "未分类"
+
+    edit_key = f"hist_edit_proj_{meeting.id}"
+    if st.session_state.get(edit_key):
+        # 编辑模式
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            new_name = st.text_input(
+                "项目名",
+                value=project_name if project_name != "未分类" else "",
+                placeholder="输入项目名称...",
+                label_visibility="collapsed",
+                key=f"hist_proj_input_{meeting.id}",
+            )
+        with c2:
+            if st.button("💾", key=f"hist_proj_save_{meeting.id}", use_container_width=True):
+                if new_name.strip():
+                    db.update_meeting_project_name(meeting.id, new_name.strip())
+                st.session_state[edit_key] = False
+                st.rerun()
+        if st.button("取消", key=f"hist_proj_cancel_{meeting.id}", type="tertiary"):
+            st.session_state[edit_key] = False
+            st.rerun()
+    else:
+        # 展示模式
+        color = "#6366F1" if project_name != "未分类" else "#94A3B8"
+        st.markdown(
+            f'<span style="font-size:12px;background:{color}15;color:{color};'
+            f'padding:2px 8px;border-radius:10px;cursor:default">'
+            f'📁 {project_name}</span>',
+            unsafe_allow_html=True,
+        )
+        if st.button("✏️", key=f"hist_proj_edit_{meeting.id}", type="tertiary"):
+            st.session_state[edit_key] = True
+            st.rerun()

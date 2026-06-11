@@ -434,14 +434,21 @@ def render_chat(data):
 
     # 输入
     with st.form("result_chat_form", clear_on_submit=True):
-        cols = st.columns([5, 1])
-        with cols[0]:
-            user_input = st.text_input(
-                "输入问题",
-                placeholder="基于会议内容提问...",
-                label_visibility="collapsed",
-            )
-        with cols[1]:
+        user_input = st.text_area(
+            "输入问题",
+            placeholder="基于会议内容提问...（最多500字）",
+            label_visibility="collapsed",
+            height=68,
+            key="result_chat_input",
+        )
+        n_chars = len(user_input) if user_input else 0
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            if n_chars > ChatAgent.MAX_USER_INPUT_LEN:
+                st.caption(f"⚠️ {n_chars}/{ChatAgent.MAX_USER_INPUT_LEN} 已超限")
+            elif n_chars > 0:
+                st.caption(f"{n_chars}/{ChatAgent.MAX_USER_INPUT_LEN}")
+        with c2:
             submitted = st.form_submit_button("发送 →", width='stretch')
 
     prompt = q or (user_input if submitted else None)
@@ -506,7 +513,9 @@ def _render_collapsible_minutes(raw_md: str):
     show_full = st.session_state.get(_EXPAND_KEY, False)
 
     if len(raw_md) > max_preview and not show_full:
-        preview = raw_md[:max_preview] + "\n\n> *全文较长，点击下方按钮查看完整内容*"
+        preview = raw_md[:max_preview] + "
+
+> *全文较長，点击下方按钮查看完整内容*"
         st.markdown(
             f'<div class="minutes-paper">{_md_to_html(preview)}</div>',
             unsafe_allow_html=True,
@@ -526,13 +535,48 @@ def _render_collapsible_minutes(raw_md: str):
                 st.rerun()
 
 
+def _is_bare_heading(text: str) -> bool:
+    """Heuristic: short line with no list markers or brackets = LLM forgot ### prefix."""
+    if any(text.startswith(p) for p in ("- ", "• ", "* ", "- [ ] ")):
+        return False
+    if any(ch in text for ch in ("【", "】", "（", "）", "(", ")")):
+        return False
+    return len(text) <= 20
+
+
+
 def _render_todos(action_text: str):
     lines = action_text.strip().split("\n")
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-        # 去掉 markdown 列表前缀
+        # 处理三级标题（含 LLM 遗漏 ### 前缀的短行）
+        if stripped.startswith("### "):
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:600;color:#475569;'
+                f'margin:0.6rem 0 0.2rem 0">{stripped[4:]}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 处理二级标题
+        if stripped.startswith("## "):
+            st.markdown(
+                f'<div style="font-size:14px;font-weight:700;color:#1E293B;'
+                f'margin:0.8rem 0 0.3rem 0;border-bottom:1px solid #E2E8F0;'
+                f'padding-bottom:4px">{stripped[3:]}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 裸标题行（LLM 遗漏 ### 前缀）
+        if _is_bare_heading(stripped):
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:600;color:#475569;'
+                f'margin:0.6rem 0 0.2rem 0">{stripped}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 普通任务条目（含 LLM 遗漏 - 前缀的行）
         content = stripped
         for prefix in ("- [ ] ", "- ", "• ", "* "):
             if content.startswith(prefix):
@@ -555,10 +599,38 @@ def _render_todos(action_text: str):
 
 def _render_resolutions(resolution_text: str):
     lines = resolution_text.strip().split("\n")
-    for i, line in enumerate(lines):
+    item_count = 0
+    for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
+        # 处理三级标题（含 LLM 遗漏 ### 前缀的短行）
+        if stripped.startswith("### "):
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:600;color:#475569;'
+                f'margin:0.6rem 0 0.2rem 0">{stripped[4:]}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 处理二级标题
+        if stripped.startswith("## "):
+            st.markdown(
+                f'<div style="font-size:14px;font-weight:700;color:#1E293B;'
+                f'margin:0.8rem 0 0.3rem 0;border-bottom:1px solid #E2E8F0;'
+                f'padding-bottom:4px">{stripped[3:]}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 裸标题行（LLM 遗漏 ### 前缀）
+        if _is_bare_heading(stripped):
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:600;color:#475569;'
+                f'margin:0.6rem 0 0.2rem 0">{stripped}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        # 普通决议条目
+        item_count += 1
         content = re.sub(r"^\d+[\.\)、]\s*", "", stripped)
         for prefix in ("- ", "• ", "* "):
             if content.startswith(prefix):
@@ -566,7 +638,7 @@ def _render_resolutions(resolution_text: str):
                 break
         st.markdown(
             f'<div class="decision-item">'
-            f'<div class="decision-number">决议 {i + 1}</div>'
+            f'<div class="decision-number">决议 {item_count}</div>'
             f'<div class="decision-text">{content}</div>'
             f"</div>",
             unsafe_allow_html=True,

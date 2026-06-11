@@ -3,9 +3,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
 STORAGE_DIR = ROOT_DIR / "storage"
 STORAGE_DIR.mkdir(exist_ok=True)
 (AUDIO_DIR := STORAGE_DIR / "audio").mkdir(exist_ok=True)
@@ -44,6 +43,18 @@ ALLOWED_TEMPLATE_EXTENSIONS = [".docx", ".md", ".pdf"]
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
+
+# RAG 检索模式: "vector" | "bm25" | "hybrid"
+SEARCH_MODE = os.getenv("SEARCH_MODE", "hybrid")
+# Reranker 开关
+RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
+# Reranker 模型
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+# 分数阈值：过滤弱相关结果，0 表示不过滤
+MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "0"))
+MIN_RERANK_SCORE = float(os.getenv("MIN_RERANK_SCORE", "0"))
+# Hybrid 检索召回宽度倍数
+RECALL_MULTIPLIER = int(os.getenv("RECALL_MULTIPLIER", "4"))
 
 # Labels
 DURATION_LABELS = {"short": "短会", "medium": "中等", "long": "长会"}

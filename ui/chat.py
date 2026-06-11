@@ -108,7 +108,7 @@ def page_chat():
     )
 
     # 输入区域
-    prompt = st.chat_input("输入你的问题...")
+    prompt = st.chat_input("输入你的问题...（最多500字）")
 
     final_prompt = q or prompt
     if final_prompt:
