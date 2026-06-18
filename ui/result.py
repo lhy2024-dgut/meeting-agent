@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import config
 from agents.chat_agent import ChatAgent
 from chains.export_chain import ExportChain, list_templates
+from chains.html_summary_chain import HtmlSummaryChain
 from chains.minutes_chain import MinutesChain, PLACEHOLDER_ALL_EMPTY
 from db.repository import MeetingRepository
 from engines.asr_engine import get_asr_engine
@@ -298,6 +300,10 @@ def page_result():
 
     st.markdown('<div style="padding:0.5rem"></div>', unsafe_allow_html=True)
 
+    _render_html_summary_section(data)
+
+    st.markdown('<div style="padding:0.25rem"></div>', unsafe_allow_html=True)
+
     with st.expander("📜 查看原始转录文本", expanded=False):
         transcripts = segments or data.get("segments", [])
         if transcripts:
@@ -469,6 +475,87 @@ def _show_template_preview():
             if template["has_pdf"]:
                 supported.append("PDF")
             st.caption(f"支持格式：{' / '.join(supported)}")
+
+
+def _render_html_summary_section(data: dict):
+    """元宝纪要可视化模块 — 生成 HTML 一图看懂纪要并内嵌展示。"""
+    meeting_id = data.get("meeting_id", "")
+    minutes_text = data.get("minutes", "")
+    if not minutes_text or not minutes_text.strip():
+        return
+
+    cache_key = f"html_viz_{meeting_id}"
+
+    with st.container(border=True):
+        title_col, btn_col = st.columns([3, 1])
+        with title_col:
+            st.markdown(
+                '<div style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:0.5rem">'
+                "🗂️ 纪要可视化概览</div>",
+                unsafe_allow_html=True,
+            )
+        with btn_col:
+            gen_btn = st.button("✨ 生成可视化纪要", key="btn_gen_html", type="primary", use_container_width=True)
+
+        view_mode = st.radio(
+            "查看方式",
+            options=["显示流程图", "显示代码块"],
+            index=0,
+            horizontal=True,
+            key="html_view_mode",
+            label_visibility="collapsed",
+        )
+
+        cached_html = st.session_state.get(cache_key)
+
+        if gen_btn:
+            with st.spinner("🤖 AI 生成可视化纪要中，请稍候..."):
+                try:
+                    chain = HtmlSummaryChain()
+                    html_out, err = chain.run(data, show_code=False, show_flowchart=True)
+                    if err and not html_out:
+                        st.error(f"生成失败：{err}")
+                        return
+                    st.session_state[cache_key] = html_out
+                    cached_html = html_out
+                    if err:
+                        st.warning(f"生成完成（警告：{err}）")
+                except Exception as exc:
+                    st.error(f"生成异常：{exc}")
+                    return
+
+        if cached_html:
+            _render_html_viz(cached_html, data.get("title", "会议纪要"), cache_key, view_mode)
+        else:
+            st.markdown(
+                '<div style="color:#94A3B8;font-size:13px;padding:0.5rem 0">'
+                "点击「✨ 生成可视化纪要」，AI 将自动生成可视化会议概览</div>",
+                unsafe_allow_html=True,
+            )
+
+
+def _render_html_viz(html: str, title: str, cache_key: str, view_mode: str):
+    """渲染 HTML 可视化纪要并提供下载和重新生成按钮。"""
+    if view_mode == "显示代码块":
+        st.code(html, language="html")
+    else:
+        estimated_height = min(max(len(html) // 5, 600), 1400)
+        components.html(html, height=estimated_height, scrolling=True)
+
+    dl_col, clear_col, _ = st.columns([1, 1, 3])
+    with dl_col:
+        safe_name = re.sub(r'[\\/*?:"<>|]', "_", title)[:40] or "meeting"
+        st.download_button(
+            label="📥 下载 HTML",
+            data=html.encode("utf-8"),
+            file_name=f"{safe_name}_元宝纪要.html",
+            mime="text/html; charset=utf-8",
+            key=f"dl_html_{cache_key}",
+        )
+    with clear_col:
+        if st.button("🔄 重新生成", key=f"clear_html_{cache_key}", type="tertiary"):
+            st.session_state.pop(cache_key, None)
+            st.rerun()
 
 
 _EXPAND_KEY = "minutes_expanded"

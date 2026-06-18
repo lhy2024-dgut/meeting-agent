@@ -286,7 +286,7 @@ class MinutesChain:
 
         for attempt in range(self.MAX_RETRY + 1):
             try:
-                raw = self.chain.invoke(params)
+                raw = chain.invoke(params)
                 raw_text = raw.content if hasattr(raw, 'content') else str(raw)
             except OllamaLLMError:
                 if attempt < self.MAX_RETRY:
