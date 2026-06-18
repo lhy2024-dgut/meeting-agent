@@ -22,10 +22,10 @@ def page_home():
         unsafe_allow_html=True,
     )
 
-    # CTA 双卡片
-    col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
+    # CTA 三卡片
+    col1, col2, col3 = st.columns([0.25, 3, 0.25])
     with col2:
-        c1, c2 = st.columns(2, gap="medium")
+        c1, c2, c3 = st.columns(3, gap="medium")
         with c1:
             st.markdown(
                 """
@@ -41,6 +41,20 @@ def page_home():
                 st.session_state.page = "upload"
                 st.rerun()
         with c2:
+            st.markdown(
+                """
+            <div class="cta-card">
+                <div class="cta-icon">🔴</div>
+                <div class="cta-title">实时转写</div>
+                <div class="cta-desc">开始录音并生成会议纪要</div>
+            </div>
+            """,
+                unsafe_allow_html=True,
+            )
+            if st.button("开始录制", key="cta_realtime", type="primary", width='stretch'):
+                st.session_state.page = "realtime"
+                st.rerun()
+        with c3:
             st.markdown(
                 """
             <div class="cta-card">

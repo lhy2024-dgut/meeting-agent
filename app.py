@@ -29,6 +29,7 @@ if "page" not in st.session_state:
 PAGE_MAP = {
     "home": "ui.home",
     "upload": "ui.upload",
+    "realtime": "ui.realtime",
     "result": "ui.result",
     "chat": "ui.chat",
     "history": "ui.history",
@@ -40,9 +41,11 @@ import importlib
 import sys
 
 # 清除项目模块缓存，确保文件改动后热重载立即生效
+# 先对 sys.modules 做快照，避免后台线程并发导入时触发 "dictionary changed size during iteration"
 _RELOAD_PREFIXES = ("ui.", "chains.", "services.", "prompts.", "engines.", "agents.", "rag.")
-for _mod in [k for k in sys.modules if any(k.startswith(p) for p in _RELOAD_PREFIXES)]:
-    del sys.modules[_mod]
+_mods_to_reload = [k for k in list(sys.modules.keys()) if any(k.startswith(p) for p in _RELOAD_PREFIXES)]
+for _mod in _mods_to_reload:
+    sys.modules.pop(_mod, None)
 
 module = importlib.import_module(module_name)
 
@@ -50,6 +53,7 @@ module = importlib.import_module(module_name)
 FUNC_MAP = {
     "home": "page_home",
     "upload": "page_upload",
+    "realtime": "page_realtime",
     "result": "page_result",
     "chat": "page_chat",
     "history": "page_history",

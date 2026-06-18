@@ -27,5 +27,9 @@ funasr
 modelscope
 torchaudio
 more-itertools
+# 实时录音采集
+sounddevice
 # WER/CER 测试
 jiwer
+# HTML 纪要校验
+beautifulsoup4
