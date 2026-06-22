@@ -203,22 +203,22 @@ def _tick_summary(svc, elapsed: float):
         st.session_state.rt_last_summary_time = time.time()
         return
 
-    # 推进 checkpoint，避免下次重复提交
-    svc.advance_checkpoint(new_pos)
+    # 先更新时间戳，checkpoint 留到 LLM 成功后再推进，失败可在下轮重试
     st.session_state.rt_last_summary_time = time.time()
     note_ts = _fmt_duration(elapsed)
     note_idx = len(st.session_state.rt_segment_notes) + 1
 
-    def _bg(text, ts, idx, out_q):
+    def _bg(text, ts, idx, out_q, _svc, pos):
         try:
             summary = _generate_segment_summary(text)
+            _svc.advance_checkpoint(pos)   # 仅成功后推进，失败则下轮包含同段重试
             out_q.put({"index": idx, "time": ts, "text": summary})
         except Exception as exc:
-            logger.warning("阶段纪要生成失败（第 %s 段）: %s", idx, exc)
+            logger.warning("阶段纪要生成失败（第 %s 段），下轮将重试: %s", idx, exc)
 
     t = threading.Thread(
         target=_bg,
-        args=(window_text, note_ts, note_idx, q),
+        args=(window_text, note_ts, note_idx, q, svc, new_pos),
         daemon=True,
         name=f"segment-summary-{note_idx}",
     )
@@ -272,6 +272,36 @@ def _render_recording():
     if svc is None:
         st.session_state.rt_state = "idle"
         st.rerun()
+        return
+
+    # 检测后台线程是否异常退出
+    err = svc.get_error()
+    if err:
+        st.error(f"录音线程异常退出：{err}")
+        salvaged_text = svc.get_text()
+        try:
+            audio_path = svc.stop()
+        except Exception:
+            audio_path = ""
+        if salvaged_text:
+            st.info(f"已保留 {len(salvaged_text)} 字的识别内容，可继续生成纪要。")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("查看已识别内容", key="rt_crash_view"):
+                    st.session_state.rt_text = salvaged_text
+                    st.session_state.rt_duration = svc.get_duration()
+                    st.session_state.rt_audio_path = audio_path
+                    st.session_state.pop("rt_diar_segments", None)
+                    st.session_state.rt_state = "stopped"
+                    st.rerun()
+            with col_b:
+                if st.button("重新录制", key="rt_crash_retry"):
+                    _reset_rt_state()
+                    st.rerun()
+        else:
+            if st.button("重新录制", key="rt_crash_retry"):
+                _reset_rt_state()
+                st.rerun()
         return
 
     current_text = svc.get_text()
@@ -333,7 +363,11 @@ def _render_recording():
 
 def _do_stop_recording(svc):
     with st.spinner("正在处理最后一段语音…"):
-        audio_path = svc.stop()
+        try:
+            audio_path = svc.stop()
+        except Exception as exc:
+            logger.warning("停止录音时出错，尝试保留已识别内容: %s", exc)
+            audio_path = ""
         final_text = svc.get_text()
         duration_s = svc.get_duration()
 

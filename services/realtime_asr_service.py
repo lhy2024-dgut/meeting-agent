@@ -41,6 +41,7 @@ class RealtimeASRService:
         self._punc_model = None         # 独立标点模型（ct-punc），stop 后一次性调用
         self._spk_model = None          # 离线说话人识别模型（cam++），懒加载
         self._running = False
+        self._error: Optional[str] = None   # 后台线程异常消息；None 表示正常
         self._lock = threading.Lock()
         self._accumulated_text: str = ""
         self._audio_buffer: list[np.ndarray] = []
@@ -130,6 +131,7 @@ class RealtimeASRService:
     def start(self):
         if self._running:
             return
+        self._error = None
         self._running = True
         self._accumulated_text = ""
         self._audio_buffer = []
@@ -145,7 +147,7 @@ class RealtimeASRService:
 
     def stop(self) -> str:
         """停止录音，等待线程结束，对完整文字补全标点，返回录音 WAV 路径。"""
-        if not self._running:
+        if not self._running and not self._audio_buffer:
             return ""
         self._running = False
         if self._record_thread and self._record_thread.is_alive():
@@ -165,6 +167,10 @@ class RealtimeASRService:
 
     def is_running(self) -> bool:
         return self._running
+
+    def get_error(self) -> Optional[str]:
+        """返回后台录音线程的异常消息；None 表示无异常。"""
+        return self._error
 
     def get_text_window(self) -> tuple[str, int]:
         """返回自上次阶段纪要 checkpoint 以来的新增文本和当前总长度。
@@ -216,7 +222,10 @@ class RealtimeASRService:
         try:
             import sounddevice as sd
         except ImportError as exc:
-            raise RuntimeError("sounddevice 未安装，请执行: pip install sounddevice") from exc
+            self._error = "sounddevice 未安装，请执行: pip install sounddevice"
+            self._running = False
+            logger.error("sounddevice 未安装: %s", exc)
+            return
 
         audio_queue: list[np.ndarray] = []
         q_lock = threading.Lock()
@@ -264,15 +273,19 @@ class RealtimeASRService:
                     time.sleep(0.02)
 
         except Exception as exc:
+            self._error = str(exc)
             logger.error("录音循环异常: %s", exc, exc_info=True)
-            raise
         finally:
+            self._running = False   # 线程退出时始终重置，防止 UI 显示假状态
             remaining = np.concatenate(acc) if acc else np.array([], dtype=np.float32)
             if len(remaining) > SAMPLE_RATE * 0.1:
-                text = self._infer(remaining, cache, is_final=True)
-                if text:
-                    with self._lock:
-                        self._accumulated_text += text
+                try:
+                    text = self._infer(remaining, cache, is_final=True)
+                    if text:
+                        with self._lock:
+                            self._accumulated_text += text
+                except Exception:
+                    pass
             duration = self._total_samples / SAMPLE_RATE
             logger.info("录音结束，时长 %.1fs，识别 %d 字", duration, len(self._accumulated_text))
 
