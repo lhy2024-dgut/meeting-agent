@@ -182,6 +182,38 @@ class MeetingService:
         if progress_callback:
             progress_callback(100, "OK 完成")
 
+    def process_from_realtime(
+        self,
+        segments: list,
+        audio_path: str,
+        file_hash: str,
+        title: str,
+        meeting_dt,
+        output_format: str = "docx",
+        template_path=None,
+        progress_callback=None,
+        scene: str = "通用会议",
+        custom_headings=None,
+        chunk_strategy=None,
+    ) -> dict:
+        """从实时转写结果生成会议纪要，跳过 ASR 步骤直接进入 _finalize 流程。"""
+        transcript = " ".join(seg.get("text", "") for seg in segments)
+        return self._finalize(
+            segments,
+            transcript,
+            audio_path,
+            file_hash,
+            title,
+            meeting_dt,
+            output_format=output_format,
+            template_path=template_path,
+            progress_callback=progress_callback,
+            scene=scene,
+            custom_headings=custom_headings,
+            chunk_strategy=chunk_strategy,
+            asr_model="realtime-funasr",
+        )
+
     def export(self, data, output_format="docx", template_path=None):
         return self.export_chain.run(data, output_format, template_path)
 
