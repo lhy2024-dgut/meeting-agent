@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import re
 from collections import OrderedDict
@@ -19,6 +19,7 @@ PLACEHOLDER_ALL_EMPTY = {PLACEHOLDER_NO_ACTION, PLACEHOLDER_NO_RESOLUTION, PLACE
 
 
 _CHINESE_ORDINALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+_DEGENERATE_MINUTES_PREFIXES = ("基于", "这段", "根据", "以下", "这是", "关于")
 
 
 def _add_heading_ordinals(text: str) -> str:
@@ -47,6 +48,51 @@ def _add_heading_ordinals(text: str) -> str:
                 line = f'### {h3_count}. {content}'
         result.append(line)
     return '\n'.join(result)
+
+
+def _format_minutes_document(title: str, date: str, topic: str, body: str) -> str:
+    body = (body or "").strip()
+    if not body:
+        return ""
+
+    header = f"# 会议纪要：{title}\n**日期**：{date}\n\n" if title else ""
+    topic_section = f"## 会议主题\n{topic.strip()}\n\n" if (topic or "").strip() else ""
+    return _add_heading_ordinals(f"{header}{topic_section}{body}".strip())
+
+
+def _normalize_meaningful_text(value: str) -> str:
+    return re.sub(r"\s+", "", re.sub(r"[#>*`\-\d\.\(\)\[\]：:，,。；;！!？?]+", "", value or ""))
+
+
+def _has_meaningful_minutes_content(
+    minutes_text: str,
+    transcript: str,
+    *,
+    body_text: str = "",
+) -> bool:
+    candidate = (body_text or minutes_text or "").strip()
+    if not candidate:
+        return False
+
+    normalized = _normalize_meaningful_text(candidate)
+    if not normalized:
+        return False
+
+    if normalized == PLACEHOLDER_LEGACY_FALLBACK:
+        return False
+
+    if len(normalized) <= 4 and any(normalized.startswith(prefix) for prefix in _DEGENERATE_MINUTES_PREFIXES):
+        return False
+
+    transcript_length = len(_normalize_meaningful_text(transcript or ""))
+    if transcript_length >= 1200 and len(normalized) < 40:
+        return False
+    if transcript_length >= 400 and len(normalized) < 24:
+        return False
+    if transcript_length >= 120 and len(normalized) < 12:
+        return False
+
+    return True
 
 
 def _repair_json_newlines(json_str: str) -> str:
@@ -87,6 +133,58 @@ def _repair_json_newlines(json_str: str) -> str:
     return ''.join(result)
 
 
+
+def _decode_json_string_fragment(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        return json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        return value.replace("\\n", "\n").replace("\\r", "").replace("\\t", "\t")
+
+
+def _extract_json_string_field(source: str, field_name: str) -> str:
+    patterns = [
+        rf'"{re.escape(field_name)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+        rf'"{re.escape(field_name)}"\s*:\s*"((?:\\.|[^"\\])*)$',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, source, re.DOTALL)
+        if match:
+            return _decode_json_string_fragment(match.group(1))
+    return ""
+
+
+def _recover_broken_minutes_json(text: str) -> dict | None:
+    """Recover malformed JSON-like output where section strings leak out of the minutes value."""
+    source = re.sub(r"```(?:json)?\s*|\s*```", "", (text or "")).strip()
+    if not source:
+        return None
+
+    minutes_span = re.search(r'"minutes"\s*:\s*(.*?)(?:,\s*"decisions"\s*:|,\s*"todos"\s*:|\}\s*$)', source, re.DOTALL)
+
+    raw_minutes = minutes_span.group(1) if minutes_span else ""
+    minute_chunks = re.findall(r'"((?:\\.|[^"\\])*)"', raw_minutes, re.DOTALL)
+    minutes = "\n\n".join(
+        chunk for chunk in (_decode_json_string_fragment(part) for part in minute_chunks) if chunk.strip()
+    ).strip()
+    if not minutes:
+        minutes = _extract_json_string_field(source, "minutes").strip()
+
+    topic = _extract_json_string_field(source, "topic").strip()
+    decisions = _extract_json_string_field(source, "decisions").strip()
+    todos = _extract_json_string_field(source, "todos").strip()
+
+    if not any([topic, minutes, decisions, todos]):
+        return None
+
+    return {
+        "topic": topic,
+        "minutes": minutes,
+        "decisions": decisions,
+        "todos": todos,
+    }
 def _try_parse_json(text: str) -> dict | None:
     """从 LLM 输出中提取 JSON 对象（新格式）。
 
@@ -99,8 +197,10 @@ def _try_parse_json(text: str) -> dict | None:
     text = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
     start = text.find("{")
     end = text.rfind("}")
-    if start == -1 or end <= start:
-        return None
+    if start == -1:
+        return _recover_broken_minutes_json(text)
+    if end <= start:
+        return _recover_broken_minutes_json(text)
     json_str = text[start : end + 1]
 
     # 第一次尝试：直接解析
@@ -113,7 +213,43 @@ def _try_parse_json(text: str) -> dict | None:
     try:
         return json.loads(_repair_json_newlines(json_str))
     except json.JSONDecodeError:
-        return None
+        return _recover_broken_minutes_json(text)
+
+
+def normalize_structured_minutes_output(
+    minutes_text: str,
+    action_items_text: str = "",
+    resolutions_text: str = "",
+    *,
+    title: str = "",
+    date: str = "",
+) -> tuple[str, str, str, bool]:
+    parsed = _try_parse_json(minutes_text or "")
+    if not parsed:
+        return action_items_text, resolutions_text, minutes_text, False
+
+    body = str(parsed.get("minutes", "")).strip()
+    normalized_minutes = _format_minutes_document(
+        title=title,
+        date=date,
+        topic=str(parsed.get("topic", "")).strip(),
+        body=body,
+    )
+    if not normalized_minutes:
+        return action_items_text, resolutions_text, minutes_text, False
+
+    normalized_action_items = (
+        str(parsed.get("todos", "")).strip() or (action_items_text or "")
+    )
+    normalized_resolutions = (
+        str(parsed.get("decisions", "")).strip() or (resolutions_text or "")
+    )
+    return (
+        normalized_action_items,
+        normalized_resolutions,
+        normalized_minutes,
+        True,
+    )
 
 
 class MinutesOutputParser(BaseOutputParser):
@@ -286,7 +422,7 @@ class MinutesChain:
 
         for attempt in range(self.MAX_RETRY + 1):
             try:
-                raw = self.chain.invoke(params)
+                raw = chain.invoke(params)
                 raw_text = raw.content if hasattr(raw, 'content') else str(raw)
             except OllamaLLMError:
                 if attempt < self.MAX_RETRY:
@@ -300,19 +436,27 @@ class MinutesChain:
                 body = parsed.get("minutes", "")
                 action_items = parsed.get("todos", "")
                 resolutions = parsed.get("decisions", "")
-                # 组装完整纪要文档（含标题、日期、主题），再统一加序号
-                header = f"# 会议纪要：{title}\n**日期**：{date}\n\n" if title else ""
-                topic_section = f"## 会议主题\n{topic}\n\n" if topic else ""
-                minutes = _add_heading_ordinals(header + topic_section + body)
+                minutes = _format_minutes_document(title, date, topic, body)
+                minutes_usable = _has_meaningful_minutes_content(
+                    minutes,
+                    transcript,
+                    body_text=str(body or ""),
+                )
             else:
                 # 回退到旧三段式格式
                 logger.debug("JSON 解析失败，回退至 ===SECTION=== 解析器")
                 action_items, resolutions, minutes = self.parser.parse(raw_text)
+                minutes_usable = _has_meaningful_minutes_content(minutes, transcript)
 
-            if minutes.strip() and minutes.strip() != "请查看会议纪要":
+            if minutes_usable:
                 break
             if attempt < self.MAX_RETRY:
-                logger.warning("纪要解析不完整，重试 %s/%s", attempt + 1, self.MAX_RETRY)
+                logger.warning(
+                    "纪要内容过短或无效，重试 %s/%s, raw=%s",
+                    attempt + 1,
+                    self.MAX_RETRY,
+                    raw_text[:120],
+                )
         else:
             # 全部重试失败：用原文截断作为备用纪要
             if len(transcript) > self.FALLBACK_TRANSCRIPT_LEN:
@@ -330,3 +474,4 @@ class MinutesChain:
         if len(self._cache) > self._max_cache:
             self._cache.popitem(last=False)
         return result
+

@@ -5,6 +5,15 @@ __pycache__/
 venv/
 .env
 *.db
+web/.next/
+web/node_modules/
+web/test-results/
+web/playwright-report/
+web/*.log
+api/*.log
+logs/
+tmp/
+migration/nextjs-fastapi/
 storage/audio/*
 storage/output/*
 storage/templates/*
@@ -14,9 +23,11 @@ storage/templates/*
 
 # 个人评估脚本和数据（自己留着跑，不进版本）
 evaluation/
+!docs/evaluation/
+!docs/evaluation/**
 data/
 
-# 运行时数据（不进入版本）
+# 运行时数据（不进版本）
 storage/terms/
 
 # 个人任务文档

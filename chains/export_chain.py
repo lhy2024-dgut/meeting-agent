@@ -11,8 +11,8 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 # ── 内置模板路径 ──────────────────────────────────────────────
-TEMPLATE_SOURCE_DIR = Path("storage/templates/source")
-TEMPLATE_PREVIEW_DIR = Path("storage/templates/previews")
+TEMPLATE_SOURCE_DIR = config.TEMPLATE_DIR / "source"
+TEMPLATE_PREVIEW_DIR = config.TEMPLATE_DIR / "previews"
 
 _TEMPLATE_REGISTRY = {}  # name -> {"docx": Path, "pdf": Path, "preview": Path}
 

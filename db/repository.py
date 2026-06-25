@@ -1,14 +1,20 @@
-﻿from contextlib import contextmanager
+from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import or_
+import bcrypt
+import config
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload
 
 from db.engine import get_engine, get_session_factory
-from db.models import Meeting, Transcription
+from db.models import Meeting, Transcription, User
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _hash_password(raw_password: str) -> str:
+    return bcrypt.hashpw(raw_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 class MeetingRepository:
@@ -20,7 +26,6 @@ class MeetingRepository:
 
     @contextmanager
     def _write_session(self):
-        """写事务：成功提交，失败回滚。"""
         session = self.Session()
         try:
             yield session
@@ -33,16 +38,100 @@ class MeetingRepository:
 
     @contextmanager
     def _read_session(self):
-        """只读会话：不提交，用完即关。"""
         session = self.Session()
         try:
             yield session
         finally:
             session.close()
 
-    def create_meeting(self, title, audio_path, duration_category, environment, file_hash=""):
+    @staticmethod
+    def _apply_user_filter(query, user_id):
+        if user_id is None:
+            return query
+        return query.filter(Meeting.user_id == user_id)
+
+    def _ensure_default_user(self, session) -> User:
+        user = session.query(User).filter_by(username=config.DEFAULT_ADMIN_USERNAME).first()
+        if user:
+            return user
+
+        user = User(
+            username=config.DEFAULT_ADMIN_USERNAME,
+            email=config.DEFAULT_ADMIN_EMAIL,
+            password_hash=_hash_password(config.DEFAULT_ADMIN_PASSWORD),
+            display_name=config.DEFAULT_ADMIN_DISPLAY_NAME,
+            created_at=datetime.now(),
+        )
+        session.add(user)
+        session.flush()
+        return user
+
+    def get_or_create_default_user(self) -> User:
         with self._write_session() as session:
+            return self._ensure_default_user(session)
+
+    def create_user(self, username, email, password_hash, display_name=""):
+        with self._write_session() as session:
+            user = User(
+                username=username,
+                email=email,
+                password_hash=password_hash,
+                display_name=display_name or username,
+                created_at=datetime.now(),
+            )
+            session.add(user)
+            session.flush()
+            return user
+
+    def get_user_by_id(self, user_id):
+        with self._read_session() as session:
+            return session.query(User).filter_by(id=user_id).first()
+
+    def get_user_by_username(self, username):
+        with self._read_session() as session:
+            return session.query(User).filter_by(username=username).first()
+
+    def get_user_by_email(self, email):
+        with self._read_session() as session:
+            return session.query(User).filter_by(email=email).first()
+
+    def get_user_by_login(self, login):
+        with self._read_session() as session:
+            return (
+                session.query(User)
+                .filter(or_(User.username == login, User.email == login))
+                .first()
+            )
+
+    def update_user_last_login(self, user_id):
+        with self._write_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.last_login_at = datetime.now()
+
+    def list_meeting_ids_for_user(self, user_id):
+        with self._read_session() as session:
+            rows = (
+                session.query(Meeting.id)
+                .filter(Meeting.user_id == user_id)
+                .order_by(Meeting.created_at.desc())
+                .all()
+            )
+            return [row.id for row in rows]
+
+    def create_meeting(
+        self,
+        title,
+        audio_path,
+        duration_category,
+        environment,
+        file_hash="",
+        user_id=None,
+    ):
+        with self._write_session() as session:
+            owner_id = user_id or self._ensure_default_user(session).id
             meeting = Meeting(
+                user_id=owner_id,
                 title=title,
                 audio_path=audio_path,
                 duration_category=duration_category,
@@ -62,9 +151,11 @@ class MeetingRepository:
         resolutions,
         short_summary=None,
         project_name=None,
+        user_id=None,
     ):
         with self._write_session() as session:
-            meeting = session.query(Meeting).filter_by(id=meeting_id).first()
+            query = session.query(Meeting).filter_by(id=meeting_id)
+            meeting = self._apply_user_filter(query, user_id).first()
             if meeting:
                 meeting.minutes_text = minutes
                 meeting.action_items_text = action_items
@@ -75,17 +166,17 @@ class MeetingRepository:
                     meeting.project_name = project_name
                 meeting.updated_at = datetime.now()
 
-    def update_meeting_project_name(self, meeting_id, project_name):
-        """供前端单字段编辑。"""
+    def update_meeting_project_name(self, meeting_id, project_name, user_id=None):
         with self._write_session() as session:
-            meeting = session.query(Meeting).filter_by(id=meeting_id).first()
+            query = session.query(Meeting).filter_by(id=meeting_id)
+            meeting = self._apply_user_filter(query, user_id).first()
             if meeting:
                 meeting.project_name = project_name[:255]
                 meeting.updated_at = datetime.now()
                 return True
             return False
 
-    def add_transcriptions_bulk(self, meeting_id, segments):
+    def add_transcriptions_bulk(self, meeting_id, segments, user_id=None):
         if not segments:
             return
         mappings = []
@@ -103,14 +194,28 @@ class MeetingRepository:
                 }
             )
         with self._write_session() as session:
+            if user_id is not None:
+                meeting = (
+                    session.query(Meeting.id)
+                    .filter(Meeting.id == meeting_id, Meeting.user_id == user_id)
+                    .first()
+                )
+                if not meeting:
+                    return
             session.bulk_insert_mappings(Transcription, mappings)
 
-    def replace_transcriptions(self, meeting_id, segments):
-        """Replace all stored transcription segments for a meeting."""
+    def replace_transcriptions(self, meeting_id, segments, user_id=None):
         with self._write_session() as session:
+            query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
+            if user_id is not None:
+                query = query.filter(Meeting.user_id == user_id)
+            if not query.first():
+                return
+
             session.query(Transcription).filter_by(meeting_id=meeting_id).delete()
             if not segments:
                 return
+
             mappings = []
             for seg in segments:
                 text_content = seg.get("text", "")
@@ -127,81 +232,202 @@ class MeetingRepository:
                 )
             session.bulk_insert_mappings(Transcription, mappings)
 
-    def delete_meeting(self, meeting_id):
+    def delete_meeting(self, meeting_id, user_id=None):
         with self._write_session() as session:
-            meeting = session.query(Meeting).filter_by(id=meeting_id).first()
+            query = session.query(Meeting).filter_by(id=meeting_id)
+            meeting = self._apply_user_filter(query, user_id).first()
             if meeting:
                 session.delete(meeting)
                 return True
             return False
 
-    def get_meeting_by_hash(self, file_hash):
+    def get_meeting_by_hash(self, file_hash, user_id=None):
         if not file_hash:
             return None
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(Meeting)
                 .options(joinedload(Meeting.transcriptions))
                 .filter_by(file_hash=file_hash)
-                .first()
             )
+            query = self._apply_user_filter(query, user_id)
+            return query.first()
 
-    def get_all_meetings(self):
+    def get_all_meetings(self, user_id=None):
         with self._read_session() as session:
-            return (
-                session.query(Meeting)
-                .options(joinedload(Meeting.transcriptions))
-                .order_by(Meeting.created_at.desc())
+            query = session.query(Meeting).options(joinedload(Meeting.transcriptions))
+            query = self._apply_user_filter(query, user_id)
+            return query.order_by(Meeting.created_at.desc()).all()
+
+    def _month_bucket_expr(self, session):
+        dialect = session.get_bind().dialect.name
+        if dialect == "sqlite":
+            return func.strftime("%Y-%m", Meeting.created_at)
+        return func.to_char(Meeting.created_at, "YYYY-MM")
+
+    def get_stats_overview_data(self, user_id=None):
+        with self._read_session() as session:
+            summary_query = session.query(
+                func.count(Meeting.id).label("total_meetings"),
+                func.coalesce(
+                    func.sum(case((Meeting.duration_category == "short", 1), else_=0)),
+                    0,
+                ).label("short_meetings"),
+                func.coalesce(
+                    func.sum(case((Meeting.duration_category == "medium", 1), else_=0)),
+                    0,
+                ).label("medium_meetings"),
+                func.coalesce(
+                    func.sum(case((Meeting.duration_category == "long", 1), else_=0)),
+                    0,
+                ).label("long_meetings"),
+                func.coalesce(
+                    func.sum(case((Meeting.environment == "multi_speaker", 1), else_=0)),
+                    0,
+                ).label("multi_speaker_meetings"),
+            )
+            summary = self._apply_user_filter(summary_query, user_id).one()
+
+            duration_query = (
+                session.query(
+                    Meeting.duration_category.label("key"),
+                    func.count(Meeting.id).label("count"),
+                )
+                .filter(Meeting.duration_category.isnot(None))
+            )
+            duration_rows = (
+                self._apply_user_filter(duration_query, user_id)
+                .group_by(Meeting.duration_category)
                 .all()
             )
 
-    def get_all_meetings_safe(self):
-        """兼容旧数据库（无 short_summary/project_name 列）的查询。"""
+            environment_query = (
+                session.query(
+                    Meeting.environment.label("key"),
+                    func.count(Meeting.id).label("count"),
+                )
+                .filter(Meeting.environment.isnot(None))
+            )
+            environment_rows = (
+                self._apply_user_filter(environment_query, user_id)
+                .group_by(Meeting.environment)
+                .all()
+            )
+
+            month_bucket = self._month_bucket_expr(session)
+            monthly_query = (
+                session.query(
+                    month_bucket.label("month"),
+                    func.count(Meeting.id).label("count"),
+                )
+                .filter(Meeting.created_at.isnot(None))
+            )
+            monthly_rows = (
+                self._apply_user_filter(monthly_query, user_id)
+                .group_by(month_bucket)
+                .order_by(month_bucket)
+                .all()
+            )
+
+            duration_distribution = {key: 0 for key in ("short", "medium", "long")}
+            for row in duration_rows:
+                if row.key:
+                    duration_distribution[row.key] = int(row.count)
+
+            environment_distribution = {
+                key: 0 for key in ("quiet", "noisy", "multi_speaker")
+            }
+            for row in environment_rows:
+                if row.key:
+                    environment_distribution[row.key] = int(row.count)
+
+            monthly_trend = [
+                {"month": row.month, "count": int(row.count)}
+                for row in monthly_rows
+                if row.month
+            ]
+
+            return {
+                "total_meetings": int(summary.total_meetings or 0),
+                "short_meetings": int(summary.short_meetings or 0),
+                "medium_meetings": int(summary.medium_meetings or 0),
+                "long_meetings": int(summary.long_meetings or 0),
+                "multi_speaker_meetings": int(summary.multi_speaker_meetings or 0),
+                "duration_distribution": duration_distribution,
+                "environment_distribution": environment_distribution,
+                "monthly_trend": monthly_trend,
+            }
+
+    def get_all_meetings_safe(self, user_id=None):
         from sqlalchemy import inspect, text
 
         with self._read_session() as session:
             inspector = inspect(session.get_bind())
             cols = [col["name"] for col in inspector.get_columns("meetings")]
-            has_new_cols = "short_summary" in cols
+            has_modern_schema = all(
+                name in cols for name in ("short_summary", "project_name", "user_id")
+            )
 
-            if has_new_cols:
-                return (
-                    session.query(Meeting)
-                    .options(joinedload(Meeting.transcriptions))
-                    .order_by(Meeting.created_at.desc())
-                    .all()
-                )
+            if has_modern_schema:
+                query = session.query(Meeting).options(joinedload(Meeting.transcriptions))
+                query = self._apply_user_filter(query, user_id)
+                return query.order_by(Meeting.created_at.desc()).all()
 
-            rows = session.execute(
-                text(
-                    "SELECT id, title, created_at, updated_at, audio_path, "
-                    "duration_category, environment, file_hash, "
-                    "minutes_text, action_items_text, resolutions_text "
-                    "FROM meetings ORDER BY created_at DESC"
-                )
-            ).fetchall()
+            select_fields = [
+                "id",
+                "title",
+                "created_at",
+                "updated_at",
+                "audio_path",
+                "duration_category",
+                "environment",
+                "file_hash",
+                "minutes_text",
+                "action_items_text",
+                "resolutions_text",
+            ]
+            if "user_id" in cols:
+                select_fields.insert(1, "user_id")
+            sql = f"SELECT {', '.join(select_fields)} FROM meetings"
+            params = {}
+            if user_id is not None and "user_id" in cols:
+                sql += " WHERE user_id = :user_id"
+                params["user_id"] = user_id
+            sql += " ORDER BY created_at DESC"
+            rows = session.execute(text(sql), params).fetchall()
+
             meetings = []
             for row in rows:
-                meeting = Meeting(
-                    id=row.id,
-                    title=row.title,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                    audio_path=row.audio_path,
-                    duration_category=row.duration_category,
-                    environment=row.environment,
-                    file_hash=row.file_hash,
-                    minutes_text=row.minutes_text,
-                    action_items_text=row.action_items_text,
-                    resolutions_text=row.resolutions_text,
+                meetings.append(
+                    Meeting(
+                        id=row.id,
+                        user_id=getattr(row, "user_id", None),
+                        title=row.title,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at,
+                        audio_path=row.audio_path,
+                        duration_category=row.duration_category,
+                        environment=row.environment,
+                        file_hash=row.file_hash,
+                        minutes_text=row.minutes_text,
+                        action_items_text=row.action_items_text,
+                        resolutions_text=row.resolutions_text,
+                    )
                 )
-                meetings.append(meeting)
             return meetings
 
-    def get_meetings_paginated(self, page=0, page_size=10, search="", dur_filter=None, env_filter=None):
-        """分页查询会议列表，不加载 transcriptions。"""
+    def get_meetings_paginated(
+        self,
+        page=0,
+        page_size=10,
+        search="",
+        dur_filter=None,
+        env_filter=None,
+        user_id=None,
+    ):
         with self._read_session() as session:
             query = session.query(Meeting)
+            query = self._apply_user_filter(query, user_id)
 
             if search:
                 query = query.filter(
@@ -235,11 +461,12 @@ class MeetingRepository:
             )
             return meetings, total
 
-    def get_meeting_by_id(self, meeting_id):
+    def get_meeting_by_id(self, meeting_id, user_id=None):
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(Meeting)
                 .options(joinedload(Meeting.transcriptions))
                 .filter_by(id=meeting_id)
-                .first()
             )
+            query = self._apply_user_filter(query, user_id)
+            return query.first()
