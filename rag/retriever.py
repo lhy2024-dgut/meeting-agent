@@ -3,7 +3,7 @@
 import hashlib
 from datetime import datetime
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 import config
 from db.engine import get_engine
@@ -400,8 +400,8 @@ class Retriever:
         bm25_filters = {}
 
         if meeting_ids is not None:
-            ids = tuple(meeting_ids)
-            conditions.append("meeting_id = ANY(:meeting_ids)")
+            ids = list(meeting_ids)
+            conditions.append("meeting_id IN :meeting_ids")
             params["meeting_ids"] = ids
             bm25_filters["meeting_ids"] = list(meeting_ids)
         elif meeting_id is not None:
@@ -441,6 +441,8 @@ class Retriever:
             ORDER BY embedding <=> :vec
             LIMIT :k
         """)
+        if "meeting_ids" in params:
+            sql = sql.bindparams(bindparam("meeting_ids", expanding=True))
 
         with self.engine.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
@@ -593,11 +595,12 @@ class Retriever:
             return {}
         try:
             with self.engine.connect() as conn:
+                sql = text(
+                    "SELECT id, title, short_summary FROM meetings WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True))
                 rows = conn.execute(
-                    text(
-                        "SELECT id, title, short_summary FROM meetings WHERE id = ANY(:ids)"
-                    ),
-                    {"ids": tuple(meeting_ids)},
+                    sql,
+                    {"ids": list(meeting_ids)},
                 ).fetchall()
             return {
                 row[0]: {"title": row[1] or f"会议#{row[0]}", "short_summary": row[2] or ""}

@@ -61,12 +61,12 @@ def test_build_filters_returns_sql_and_bm25_filters():
     )
 
     assert conditions == [
-        "meeting_id = ANY(:meeting_ids)",
+        "meeting_id IN :meeting_ids",
         "meeting_id != :exclude_id",
         "chunk_type = :ctype",
     ]
     assert params == {
-        "meeting_ids": (1, 2),
+        "meeting_ids": [1, 2],
         "exclude_id": 3,
         "ctype": "minutes",
     }
@@ -75,3 +75,29 @@ def test_build_filters_returns_sql_and_bm25_filters():
         "exclude_meeting_id": 3,
         "chunk_type": "minutes",
     }
+
+
+
+def test_get_meeting_info_uses_expanding_in_clause():
+    retriever = Retriever.__new__(Retriever)
+    from unittest.mock import MagicMock
+
+    retriever.engine = MagicMock()
+    conn = retriever.engine.connect.return_value.__enter__.return_value
+    conn.execute.return_value.fetchall.return_value = [
+        (1, "Budget Review", "summary"),
+        (2, "Roadmap", "summary2"),
+    ]
+
+    info = retriever._get_meeting_info([1, 2])
+
+    assert info == {
+        1: {"title": "Budget Review", "short_summary": "summary"},
+        2: {"title": "Roadmap", "short_summary": "summary2"},
+    }
+    sql = conn.execute.call_args.args[0]
+    params = conn.execute.call_args.args[1]
+    rendered = str(sql)
+    assert "WHERE id IN" in rendered
+    assert "POSTCOMPILE_ids" in rendered
+    assert params == {"ids": [1, 2]}

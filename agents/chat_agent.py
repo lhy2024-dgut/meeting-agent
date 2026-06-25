@@ -58,7 +58,7 @@ class ChatAgent:
 
     def set_meeting_context(
         self, transcript="", minutes="", action_items="", resolutions="",
-        meeting_id=None, cross_meeting=False,
+        meeting_id=None, cross_meeting=False, meeting_ids=None,
     ):
         """注入会议上下文；切换会议时自动生成新 thread_id，Memory 完全隔离。
         cross_meeting=True 时不注入具体会议内容，RAG 搜索所有会议。
@@ -67,7 +67,7 @@ class ChatAgent:
         if cross_meeting:
             self.meeting_context = {
                 "transcript": "", "minutes": "", "action_items": "",
-                "resolutions": "", "meeting_id": None,
+                "resolutions": "", "meeting_id": None, "meeting_ids": meeting_ids or [],
             }
             self._thread_id = f"cross_{uuid.uuid4().hex[:8]}"
             self._trimmed = False
@@ -96,6 +96,7 @@ class ChatAgent:
             "action_items": action_items[: self.MAX_ITEMS_LEN],
             "resolutions": resolutions[: self.MAX_ITEMS_LEN],
             "meeting_id": meeting_id,
+            "meeting_ids": meeting_ids or [],
         }
         # 新会议 → 新 thread，checkpoint 完全隔离，不可能串台
         self._thread_id = f"meeting_{meeting_id}_{uuid.uuid4().hex[:8]}"
@@ -109,7 +110,11 @@ class ChatAgent:
         try:
             retriever = get_retriever()
             if self._cross_meeting:
-                results = retriever.search(user_message, top_k=5)
+                results = retriever.search(
+                    user_message,
+                    top_k=5,
+                    meeting_ids=self.meeting_context.get("meeting_ids"),
+                )
             else:
                 results = retriever.search(
                     user_message,

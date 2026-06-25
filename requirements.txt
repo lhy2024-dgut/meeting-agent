@@ -1,4 +1,6 @@
-streamlit
+fastapi
+uvicorn
+pydantic
 sqlalchemy
 psycopg2-binary
 faster-whisper
@@ -15,6 +17,8 @@ ollama
 pgvector
 python-dotenv
 alembic
+bcrypt
+PyJWT
 # RAG 检索优化
 transformers
 rank_bm25

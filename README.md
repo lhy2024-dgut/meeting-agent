@@ -1,70 +1,199 @@
-# Meeting Agent — AI 会议纪要智能体
+# Meeting Agent
 
-## 分支规范
+Meeting Agent is an AI meeting assistant built around a Python backend and a Next.js frontend.
+The active mainline is `FastAPI + Next.js`.
 
-| 分支 | 用途 | 说明 |
-|---|---|---|
-| main | 生产分支 | 每周末从 dev 合并，需 1人 review |
-| dev | 开发集成分支 | 所有 feature 分支合并到这里，需 1人 review |
-| feature/xxx | 功能开发分支 | 从 dev 拉出，完成后 PR 到 dev |
-| demo/xxx | 个人 Demo | 各自提交到 demo/ 子目录 |
+## Current Architecture
 
-## 开发流程
+- `api/`: FastAPI HTTP entry, routers, schemas, in-process job manager
+- `web/`: Next.js App Router frontend, Playwright E2E tests
+- `services/`: meeting processing pipeline orchestration
+- `agents/`: chat agent and multi-turn Q&A
+- `chains/`: minutes extraction and export chains
+- `db/`: SQLAlchemy models and repository layer
+- `rag/`: embeddings, retrieval, reranking, chunking
+- `engines/`: ASR, audio, PDF and LLM-related engines
+- `storage/`: local runtime storage for uploaded files, templates and outputs
 
-1. 从 dev 拉出 feature 分支：git checkout -b feature/你的功能名
-2. 开发完成后推送：git push origin feature/你的功能名
-3. 在 GitHub 发 PR，目标分支选 dev，指定其他人 review
-4. review 通过后合并，删除 feature 分支
+## Tech Stack
 
-## 项目结构
+Backend:
 
+- Python
+- FastAPI
+- SQLAlchemy
+- PostgreSQL + pgvector
+- Ollama
+- LangGraph / LangChain Core
+- Faster-Whisper / FunASR
+
+Frontend:
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- Playwright
+
+## Prerequisites
+
+- Python 3.11+
+- Node.js 20+
+- PostgreSQL
+- Ollama
+- `ffmpeg` and `ffprobe`
+
+## Backend Setup
+
+Install Python dependencies:
+
+```powershell
+pip install -r requirements.txt
 ```
-meeting-agent/
-├── app.py                  # Streamlit Web 入口
-├── main.py                 # CLI 入口
-├── config.py               # 全局配置 + Ollama LLM 封装
-├── requirements.txt        # Python 依赖
-│
-├── agents/                 # 智能体
-│   └── chat_agent.py       # 会议问答 Agent（RAG + 多轮对话）
-│
-├── chains/                 # 处理链
-│   ├── minutes_chain.py    # 纪要提取链（ASR 文本 → 待办/决议/纪要）
-│   └── export_chain.py     # 文档导出链（DOCX / MD / PDF）
-│
-├── engines/                # 底层引擎
-│   ├── asr_engine.py       # Faster-Whisper 语音识别
-│   ├── audio_utils.py      # 音频格式转换 + 视频抽音轨
-│   └── pdf_engine.py       # PDF 生成（PyMuPDF + pypdf）
-│
-├── services/               # 业务编排
-│   ├── meeting_service.py  # 7 步会议处理流水线
-│   └── file_service.py     # 文件上传 / 哈希 / 存储
-│
-├── db/                     # 数据库层
-│   ├── models.py           # SQLAlchemy ORM（Meeting + Transcription）
-│   └── repository.py       # 数据仓储层（CRUD）
-│
-├── rag/                    # RAG 知识库
-│   ├── embeddings.py       # bge-m3 向量嵌入
-│   ├── retriever.py        # PGVector 检索器
-│   └── text_splitter.py    # 中文文本分块
-│
-├── prompts/                # Prompt 模板
-│   └── templates.py        # 纪要提取 + 会议问答模板
-│
-├── ui/                     # Streamlit 页面
-│   ├── home.py             # 首页（统计 + 最近会议）
-│   ├── upload.py           # 上传页（音频/视频 + 参数配置）
-│   ├── result.py           # 结果页（纪要/待办/决议/问答）
-│   ├── chat.py             # 独立问答页
-│   ├── history.py          # 历史会议（搜索/过滤/分页）
-│   ├── stats.py            # 数据统计（Plotly 图表）
-│   ├── components.py       # 公共 UI 组件
-│   └── global_css.py       # 全局样式主题
-│
-├── storage/                # 本地存储
-    ├── audio/              # 上传的音频文件
-    ├── video/              # 上传的视频文件
-    ├── templates/          # 自定义导出模板
-    └── vector_store/       # PGVector 向量索引
+
+Configure environment variables in `.env`. The key variables are:
+
+- `DATABASE_URL`
+- `OLLAMA_BASE_URL`
+- `LLM_MODEL`
+- `WHISPER_MODEL`
+
+Start the API from the repository root:
+
+```powershell
+python -m uvicorn api.app:app --host 127.0.0.1 --port 8000
+```
+
+Health check:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8000/api/health -UseBasicParsing
+```
+
+## Frontend Setup
+
+Install frontend dependencies:
+
+```powershell
+cd web
+npm install
+```
+
+Run a production-style frontend session:
+
+```powershell
+cd web
+npm run build
+npm run start -- --hostname 127.0.0.1 --port 3000
+```
+
+Frontend URL:
+
+- `http://127.0.0.1:3000`
+
+API URL:
+
+- `http://127.0.0.1:8000/api`
+
+If needed, override the frontend API target with:
+
+- `NEXT_PUBLIC_API_BASE_URL`
+
+## Mainline Features
+
+Current primary user flows:
+
+- `/login` and `/register`: local account registration and login with JWT-based API auth
+- `/meetings/new`: upload local audio or video files and generate meeting minutes
+- `/realtime`: record from the browser microphone, stream chunked transcription to the backend, optionally run speaker diarization, then generate a meeting
+- `/meetings/[id]`: inspect minutes, structured todos, resolutions, transcript, meeting chat, and HTML summary preview/download
+- `/todos`: view and maintain structured action items across meetings
+- `/chat`: single-meeting and cross-meeting Q&A
+- `/stats`: overview metrics and charts
+
+HTML summary support:
+
+- The meeting detail page can generate a visual HTML summary from stored minutes, action items, resolutions, and transcript context.
+- Generated HTML summaries are stored under `storage/output/` and can be previewed or downloaded from the detail page.
+
+Realtime recording support:
+
+- Browser audio is recorded in chunks on the frontend and uploaded to the backend session API.
+- The backend converts chunks to WAV, runs ASR incrementally, keeps an in-memory realtime session, and can finalize that session into a normal stored meeting.
+- After recording stops, the user can optionally run offline speaker diarization before generating the final meeting.
+
+## Mainline API Additions
+
+Auth routes:
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+
+Meeting-related routes:
+
+- `GET /api/meetings/{id}`
+- `GET /api/meetings/{id}/transcript`
+- `POST /api/meetings/{id}/html-summary/generate`
+- `GET /api/meetings/{id}/html-summary`
+
+Todo routes:
+
+- `GET /api/todos`
+- `POST /api/meetings/{id}/todos`
+- `PATCH /api/todos/{todo_id}`
+- `POST /api/todos/{todo_id}/status`
+- `GET /api/todos/{todo_id}/logs`
+
+Realtime session routes:
+
+- `POST /api/realtime/sessions`
+- `GET /api/realtime/sessions/{session_id}`
+- `POST /api/realtime/sessions/{session_id}/chunks`
+- `POST /api/realtime/sessions/{session_id}/stop`
+- `POST /api/realtime/sessions/{session_id}/diarize`
+- `POST /api/realtime/sessions/{session_id}/generate`
+- `DELETE /api/realtime/sessions/{session_id}`
+
+## E2E Validation
+
+Default E2E auth behavior:
+
+- the Playwright helpers log in through `/api/auth/login`
+- by default they use the migrated admin account: `admin / ChangeMe123!`
+- this default assumes the database already contains sample meetings owned by that admin account
+- override with `PLAYWRIGHT_E2E_USERNAME`, `PLAYWRIGHT_E2E_PASSWORD`, `PLAYWRIGHT_E2E_EMAIL`, and `PLAYWRIGHT_E2E_USE_ADMIN=false` if you want a dedicated test user
+
+Migration compatibility note:
+
+- the Alembic chain now includes compatibility revisions for the old mainline, including the legacy `86cee12a749a` step
+- `alembic upgrade head` should advance old databases to `20260625_0002`
+
+Run smoke tests:
+
+```powershell
+cd web
+npm run test:e2e:smoke
+```
+
+Run the full E2E suite:
+
+```powershell
+cd web
+npm run test:e2e:full
+```
+
+## Recommended Start Order
+
+1. Start the FastAPI backend.
+2. Run `alembic upgrade head`.
+2. Build and start the Next.js frontend.
+3. Run `npm run test:e2e:smoke`.
+4. Run `npm run test:e2e:full` before release or deployment.
+
+## Notes
+
+- `main.py` is still available as a local CLI entry for utility workflows.
+- Historical cutover notes are archived under `docs/archive/streamlit-cutover/`.

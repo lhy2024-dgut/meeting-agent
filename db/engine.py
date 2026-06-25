@@ -8,15 +8,20 @@ import config
 def get_engine(url=None):
     """返回数据库引擎，支持通过 url 参数注入（测试/多环境）"""
     target_url = url or config.DATABASE_URL
-    engine = create_engine(
-        target_url,
-        poolclass=QueuePool,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-        echo=False,
-    )
+    engine_kwargs = {"echo": False}
+    if target_url.startswith("sqlite"):
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        engine_kwargs.update(
+            {
+                "poolclass": QueuePool,
+                "pool_size": 5,
+                "max_overflow": 10,
+                "pool_pre_ping": True,
+                "pool_recycle": 3600,
+            }
+        )
+    engine = create_engine(target_url, **engine_kwargs)
     _register_vector_adapters(engine)
     return engine
 

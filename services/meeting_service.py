@@ -6,7 +6,12 @@ from pathlib import Path
 import yaml
 
 from chains.export_chain import ExportChain
-from chains.minutes_chain import MinutesChain, PLACEHOLDER_NO_ACTION, PLACEHOLDER_NO_RESOLUTION
+from chains.minutes_chain import (
+    MinutesChain,
+    PLACEHOLDER_NO_ACTION,
+    PLACEHOLDER_NO_RESOLUTION,
+    normalize_structured_minutes_output,
+)
 from engines.asr_engine import ASREngine, _PARALLEL_MIN_SEC, _get_audio_duration, get_asr_engine
 from engines.llm import get_llm
 from logger import get_logger
@@ -53,6 +58,7 @@ class MeetingService:
         file_hash,
         title,
         meeting_dt,
+        user_id=None,
         output_format="docx",
         template_path=None,
         progress_callback=None,
@@ -63,7 +69,7 @@ class MeetingService:
         chunk_strategy=None,
     ):
         """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
-        cached = self.db.get_meeting_by_hash(file_hash)
+        cached = self.db.get_meeting_by_hash(file_hash, user_id=user_id)
         if not terms and cached and any(
             [cached.minutes_text, cached.action_items_text, cached.resolutions_text]
         ):
@@ -90,6 +96,7 @@ class MeetingService:
             terms=terms,
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
+            user_id=user_id,
         )
 
     def process_stream(
@@ -98,6 +105,7 @@ class MeetingService:
         file_hash,
         title,
         meeting_dt,
+        user_id=None,
         output_format="docx",
         template_path=None,
         progress_callback=None,
@@ -175,6 +183,7 @@ class MeetingService:
             terms=terms,
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
+            user_id=user_id,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -182,21 +191,26 @@ class MeetingService:
         if progress_callback:
             progress_callback(100, "OK 完成")
 
+    def export(self, data, output_format="docx", template_path=None):
+        return self.export_chain.run(data, output_format, template_path)
+
     def process_from_realtime(
         self,
-        segments: list,
-        audio_path: str,
-        file_hash: str,
-        title: str,
+        segments,
+        audio_path,
+        file_hash,
+        title,
         meeting_dt,
-        output_format: str = "docx",
+        user_id=None,
+        output_format="docx",
         template_path=None,
         progress_callback=None,
-        scene: str = "通用会议",
+        scene="通用会议",
         custom_headings=None,
+        terms=None,
         chunk_strategy=None,
-    ) -> dict:
-        """从实时转写结果生成会议纪要，跳过 ASR 步骤直接进入 _finalize 流程。"""
+    ):
+        """使用实时录音阶段已经累计好的转写结果生成会议纪要。"""
         transcript = " ".join(seg.get("text", "") for seg in segments)
         return self._finalize(
             segments,
@@ -205,17 +219,16 @@ class MeetingService:
             file_hash,
             title,
             meeting_dt,
-            output_format=output_format,
-            template_path=template_path,
-            progress_callback=progress_callback,
+            output_format,
+            template_path,
+            progress_callback,
             scene=scene,
             custom_headings=custom_headings,
+            terms=terms,
             chunk_strategy=chunk_strategy,
-            asr_model="realtime-funasr",
+            asr_model="realtime-browser",
+            user_id=user_id,
         )
-
-    def export(self, data, output_format="docx", template_path=None):
-        return self.export_chain.run(data, output_format, template_path)
 
     def _handle_cache_hit(self, cached, output_format, template_path, progress_callback):
         segments = [
@@ -236,15 +249,27 @@ class MeetingService:
             "action_items": cached.action_items_text or "",
             "resolutions": cached.resolutions_text or "",
         }
+        normalized_action_items, normalized_resolutions, normalized_minutes, _ = (
+            normalize_structured_minutes_output(
+                output_data["minutes"],
+                output_data["action_items"],
+                output_data["resolutions"],
+                title=cached.title or "",
+                date=output_data["date"],
+            )
+        )
+        output_data["minutes"] = normalized_minutes
+        output_data["action_items"] = normalized_action_items
+        output_data["resolutions"] = normalized_resolutions
         output_path = self.export_chain.run(output_data, output_format, template_path)
         if progress_callback:
             progress_callback(100, "⚡ 缓存命中")
         return {
             "transcript": transcript,
             "segments": segments,
-            "minutes": cached.minutes_text or "",
-            "action_items": cached.action_items_text or "",
-            "resolutions": cached.resolutions_text or "",
+            "minutes": output_data["minutes"],
+            "action_items": output_data["action_items"],
+            "resolutions": output_data["resolutions"],
             "short_summary": cached.short_summary or "",
             "project_name": cached.project_name or "",
             "meeting_id": cached.id,
@@ -270,6 +295,7 @@ class MeetingService:
         terms=None,
         chunk_strategy=None,
         asr_model=None,
+        user_id=None,
     ):
         """Steps 3-7: 分类 -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。"""
         if progress_callback:
@@ -278,7 +304,7 @@ class MeetingService:
         duration_category = ASREngine.classify_duration(duration)
         environment = "unknown"
         meeting_id = self.db.create_meeting(
-            title, file_path, duration_category, environment, file_hash
+            title, file_path, duration_category, environment, file_hash, user_id=user_id
         )
 
         if terms:
@@ -297,6 +323,15 @@ class MeetingService:
             scene=scene,
             custom_headings=custom_headings,
         )
+        action_items, resolutions, minutes, normalized = normalize_structured_minutes_output(
+            minutes,
+            action_items,
+            resolutions,
+            title=title,
+            date=date_str,
+        )
+        if normalized:
+            logger.info("已在保存前修复结构化纪要 JSON: title=%s", title)
 
         if not (minutes or "").strip():
             if len(transcript or "") > _FALLBACK_TRANSCRIPT_LEN:
@@ -320,7 +355,7 @@ class MeetingService:
 
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
-        self.db.add_transcriptions_bulk(meeting_id, segments)
+        self.db.add_transcriptions_bulk(meeting_id, segments, user_id=user_id)
         self.db.update_meeting_results(
             meeting_id,
             minutes,
@@ -328,6 +363,7 @@ class MeetingService:
             resolutions,
             short_summary=short_summary,
             project_name=project_name,
+            user_id=user_id,
         )
 
         if progress_callback:

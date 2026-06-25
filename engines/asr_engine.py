@@ -1,4 +1,4 @@
-﻿import json
+import json
 import multiprocessing
 import os
 import re
@@ -16,24 +16,27 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 
+_FFMPEG_CANDIDATE_DIRS = [
+    r"C:\ffmpeg\ffmpeg-master-latest-win64-gpl\bin",
+    r"D:\ffmpeg\bin",
+    r"C:\ffmpeg\bin",
+    r"C:\Program Files\ffmpeg\bin",
+    r"C:\ProgramData\chocolatey\bin",
+]
+
+
 def _find_exe(name: str) -> str:
-    """Resolve ffmpeg/ffprobe binaries across common Windows install paths."""
-    found = shutil.which(name)
-    if found:
-        return found
-    candidates = [
-        r"D:\ffmpeg\bin",
-        r"C:\ffmpeg\bin",
-        r"C:\Program Files\ffmpeg\bin",
-        r"C:\ProgramData\chocolatey\bin",
-    ]
-    for directory in candidates:
+    """Resolve ffmpeg/ffprobe, preferring standalone builds over unrelated PATH entries."""
+    for directory in _FFMPEG_CANDIDATE_DIRS:
         path = os.path.join(directory, name + ".exe")
         if os.path.isfile(path):
             return path
+
+    found = shutil.which(name)
+    if found:
+        return found
+
     return name
-
-
 _FFMPEG = _find_exe("ffmpeg")
 _FFPROBE = _find_exe("ffprobe")
 logger.info("ffmpeg: %s  ffprobe: %s", _FFMPEG, _FFPROBE)
@@ -224,10 +227,10 @@ def _get_audio_duration(audio_path: str) -> float:
         result = subprocess.run(
             [_FFPROBE, "-v", "quiet", "-print_format", "json", "-show_format", audio_path],
             capture_output=True,
-            text=True,
+            text=False,
             timeout=10,
         )
-        info = json.loads(result.stdout)
+        info = json.loads(result.stdout.decode("utf-8", errors="replace"))
         return float(info.get("format", {}).get("duration", 0))
     except Exception as exc:
         logger.warning("_get_audio_duration 失败: %s", exc)
