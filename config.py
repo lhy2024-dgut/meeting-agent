@@ -17,7 +17,7 @@ DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "meeting_db")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASS", "")  # 必须设置环境变量
+DB_PASS = os.getenv("DB_PASS", "")  # 必须通过环境变量设置
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -55,9 +55,9 @@ CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 
 # Chunk 切分策略: "fixed_512" | "segment_300" | "semantic"
-CHUNK_STRATEGY_FIXED    = "fixed_512"    # 现有固定 512 字切分
-CHUNK_STRATEGY_SEGMENT  = "segment_300"  # ASR segments 合并至 300 字
-CHUNK_STRATEGY_SEMANTIC = "semantic"     # 基于 embedding 语义相似度切分
+CHUNK_STRATEGY_FIXED = "fixed_512"  # 固定 512 字切分
+CHUNK_STRATEGY_SEGMENT = "segment_300"  # ASR segments 合并至约 300 字
+CHUNK_STRATEGY_SEMANTIC = "semantic"  # 基于 embedding 语义相似度切分
 
 # RAG 检索模式: "vector" | "bm25" | "hybrid"
 SEARCH_MODE = os.getenv("SEARCH_MODE", "hybrid")

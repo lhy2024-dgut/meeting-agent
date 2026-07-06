@@ -21,7 +21,12 @@ import {
   TranscriptResponse,
   UploadMetadataResponse,
 } from "@/types/api";
-import { clearAuthTokens, getAccessToken } from "@/lib/auth";
+import {
+  clearAuthTokens,
+  getAccessToken,
+  getRefreshToken,
+  setAuthTokens,
+} from "@/lib/auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api";
@@ -33,6 +38,7 @@ const AUTH_IGNORED_PATHS = new Set([
   "/auth/register",
   "/auth/refresh",
 ]);
+let refreshPromise: Promise<string | null> | null = null;
 
 export type ApiRequestOptions = {
   signal?: AbortSignal;
@@ -82,6 +88,45 @@ async function resolveHeaders(initHeaders?: HeadersInit): Promise<Headers> {
     headers.set("Authorization", `Bearer ${token}`);
   }
   return headers;
+}
+
+async function tryRefreshAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = await getRefreshToken();
+      if (!refreshToken) {
+        return null;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = (await response.json()) as AuthTokenResponse;
+      if (!payload.access_token || !payload.refresh_token) {
+        return null;
+      }
+
+      setAuthTokens(payload.access_token, payload.refresh_token);
+      return payload.access_token;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
 }
 
 async function handleUnauthorized(path: string) {
@@ -175,6 +220,7 @@ async function requestJson<T>(
   path: string,
   init: RequestInit = {},
   options: ApiRequestOptions = {},
+  retryAfterRefresh = true,
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeoutController = new AbortController();
@@ -191,6 +237,12 @@ async function requestJson<T>(
     });
 
     if (!response.ok) {
+      if (response.status === 401 && retryAfterRefresh && !AUTH_IGNORED_PATHS.has(path)) {
+        const refreshedToken = await tryRefreshAccessToken();
+        if (refreshedToken) {
+          return requestJson<T>(path, init, options, false);
+        }
+      }
       if (response.status === 401) {
         await handleUnauthorized(path);
       }

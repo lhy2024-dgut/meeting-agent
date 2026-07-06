@@ -1,5 +1,6 @@
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -101,6 +102,16 @@ class MeetingChunk(Base):
 
 class TodoItem(Base):
     __tablename__ = "todo_items"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'done', 'cancelled')",
+            name="ck_todo_items_status_valid",
+        ),
+        CheckConstraint(
+            "priority IN ('high', 'medium', 'low')",
+            name="ck_todo_items_priority_valid",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(
@@ -135,6 +146,12 @@ class TodoItem(Base):
 
 class TodoStatusLog(Base):
     __tablename__ = "todo_status_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "to_status IN ('pending', 'done', 'cancelled')",
+            name="ck_todo_status_logs_to_status_valid",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     todo_id = Column(

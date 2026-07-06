@@ -169,7 +169,7 @@ Default E2E auth behavior:
 Migration compatibility note:
 
 - the Alembic chain now includes compatibility revisions for the old mainline, including the legacy `86cee12a749a` step
-- `alembic upgrade head` should advance old databases to `20260625_0002`
+- `alembic upgrade head` should advance old databases to `20260706_0003`
 
 Run smoke tests:
 

@@ -61,6 +61,34 @@ def test_register_login_refresh_and_me(tmp_path):
     assert refreshed.json()["access_token"]
 
 
+def test_me_accepts_access_token_cookie(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "cookie-user",
+            "email": "cookie@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "cookie-user", "password": "StrongPass1"},
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+
+    client.cookies.set("meeting_agent_access_token", access_token)
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["username"] == "cookie-user"
+
+
 def test_register_rejects_duplicates_and_weak_password(tmp_path):
     repo = _build_repo(tmp_path)
     app = FastAPI()

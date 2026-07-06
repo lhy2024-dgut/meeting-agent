@@ -211,7 +211,7 @@ E2E auth notes:
 
 Migration notes:
 
-- the current Alembic head is `20260625_0002`
+- the current Alembic head is `20260706_0003`
 - compatibility revisions for `d69ff883dd59`, `a1b2c3d4e5f6`, `86cee12a749a`, `662a20a42c74`, and `5ebf9e3a9002` are preserved so older local databases can still upgrade onto the FastAPI + Next.js mainline
 
 Historical cutover material is archived under `docs/archive/streamlit-cutover/`.

@@ -23,6 +23,18 @@ const VALID_SOURCE_TYPES: MeetingSourceType[] = [
   "resolution",
 ];
 
+const SOURCE_ALIASES: Record<string, MeetingSourceType> = {
+  transcript: "transcript",
+  transcripts: "transcript",
+  minute: "minutes",
+  minutes: "minutes",
+  action_item: "action_item",
+  action_items: "action_item",
+  actionitem: "action_item",
+  resolution: "resolution",
+  resolutions: "resolution",
+};
+
 export default async function MeetingPage({
   params,
   searchParams,
@@ -39,9 +51,10 @@ export default async function MeetingPage({
     notFound();
   }
 
-  const sourceType = VALID_SOURCE_TYPES.includes(source as MeetingSourceType)
-    ? (source as MeetingSourceType)
-    : null;
+  const normalizedSource = typeof source === "string" ? source.trim().toLowerCase() : "";
+  const sourceType = VALID_SOURCE_TYPES.includes(normalizedSource as MeetingSourceType)
+    ? (normalizedSource as MeetingSourceType)
+    : SOURCE_ALIASES[normalizedSource] ?? null;
 
   return (
     <MeetingDetailPage

@@ -49,12 +49,13 @@ def _split_meta(item: str) -> tuple[str, str | None, datetime | None]:
     due_date = None
 
     for meta in parts[1:]:
-        lowered = meta.lower()
-        if meta.startswith("负责人:") or meta.startswith("负责人："):
-            assignee = meta.split(":", 1)[-1].split("：", 1)[-1].strip() or None
+        normalized = meta.replace("：", ":").strip()
+        lowered = normalized.lower()
+        if normalized.startswith("负责人:"):
+            assignee = normalized.split(":", 1)[-1].strip() or None
             continue
-        if meta.startswith("截止:") or meta.startswith("截止：") or meta.startswith("due:"):
-            raw_due = meta.split(":", 1)[-1].split("：", 1)[-1].strip()
+        if normalized.startswith("截止:") or lowered.startswith("due:"):
+            raw_due = normalized.split(":", 1)[-1].strip()
             if raw_due:
                 try:
                     due_date = parse_due_date(raw_due)
@@ -63,7 +64,8 @@ def _split_meta(item: str) -> tuple[str, str | None, datetime | None]:
             continue
         if assignee is None and re.search(r"[A-Za-z\u4e00-\u9fff]", meta):
             assignee = meta
-        elif due_date is None:
+            continue
+        if due_date is None:
             try:
                 due_date = parse_due_date(meta)
             except ValueError:
@@ -174,6 +176,10 @@ class TodoService:
         due_date: str | datetime | None = None,
         priority: str | None = None,
     ) -> TodoItem:
+        normalized_content = (content or "").strip()
+        if not normalized_content:
+            raise TodoTransitionError("Todo content is required")
+
         with self._write_session() as session:
             meeting = (
                 session.query(Meeting)
@@ -187,7 +193,7 @@ class TodoService:
             todo = TodoItem(
                 user_id=user_id,
                 meeting_id=meeting_id,
-                content=content.strip(),
+                content=normalized_content,
                 assignee=(assignee or "").strip() or None,
                 due_date=parse_due_date(due_date),
                 status=TODO_STATUS_PENDING,
@@ -231,7 +237,10 @@ class TodoService:
                 raise TodoTransitionError("Todo not found")
 
             if content is not None:
-                todo.content = content.strip()
+                normalized_content = content.strip()
+                if not normalized_content:
+                    raise TodoTransitionError("Todo content is required")
+                todo.content = normalized_content
             if assignee is not None:
                 todo.assignee = assignee.strip() or None
             if due_date is not None:
