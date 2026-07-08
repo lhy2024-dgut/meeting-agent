@@ -1,15 +1,37 @@
 ﻿"""FunASR / SenseVoiceSmall ASR 引擎。"""
 
+import os
 import re
 import shutil
 import tempfile
 import time
+from pathlib import Path
 
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 _funasr_model = None
+
+_MODELSCOPE_LOCAL = (
+    Path(os.environ.get("MODELSCOPE_CACHE", Path.home() / ".cache" / "modelscope" / "hub"))
+    / "models" / "iic" / "SenseVoiceSmall"
+)
+_HF_LOCAL = (
+    Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface" / "hub"))
+    / "models--FunAudioLLM--SenseVoiceSmall" / "snapshots"
+)
+
+
+def _hf_snapshot_path() -> Path | None:
+    """返回 HuggingFace 快照本地路径（取最新快照），不存在则返回 None。"""
+    if not _HF_LOCAL.exists():
+        return None
+    snapshots = sorted(_HF_LOCAL.iterdir())
+    for snap in reversed(snapshots):
+        if (snap / "model.pt").exists() or (snap / "config.yaml").exists():
+            return snap
+    return None
 
 
 def _load_model():
@@ -20,10 +42,21 @@ def _load_model():
 
     from funasr import AutoModel
 
-    candidates = [
+    # 优先使用本地缓存路径，完全跳过网络请求
+    candidates: list[dict] = []
+    if _MODELSCOPE_LOCAL.exists():
+        candidates.append({"model": str(_MODELSCOPE_LOCAL)})
+        logger.info("检测到 ModelScope 本地缓存：%s", _MODELSCOPE_LOCAL)
+    hf_snap = _hf_snapshot_path()
+    if hf_snap:
+        candidates.append({"model": str(hf_snap)})
+        logger.info("检测到 HuggingFace 本地缓存：%s", hf_snap)
+    # 网络备用
+    candidates += [
         {"model": "iic/SenseVoiceSmall"},
         {"model": "FunAudioLLM/SenseVoiceSmall", "hub": "hf"},
     ]
+
     last_err = None
     for kwargs in candidates:
         try:

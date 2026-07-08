@@ -243,3 +243,162 @@ class MeetingRepository:
                 .filter_by(id=meeting_id)
                 .first()
             )
+
+
+class ContactRepository:
+    """联系人和邮件日志仓库"""
+
+    def __init__(self, db_url=None):
+        from db.engine import get_engine, get_session_factory
+        self.engine = get_engine(url=db_url) if db_url else get_engine()
+        self.Session = get_session_factory(engine=self.engine)
+
+    @contextmanager
+    def _write_session(self):
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    @contextmanager
+    def _read_session(self):
+        session = self.Session()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    # ── Contact CRUD ──
+
+    def create_contact(self, name: str, email: str, note: str = "") -> int:
+        from db.models import Contact
+        with self._write_session() as session:
+            c = Contact(name=name, email=email, note=note, created_at=datetime.now())
+            session.add(c)
+            session.flush()
+            return c.id
+
+    def update_contact(self, contact_id: int, name: str, email: str, note: str = ""):
+        from db.models import Contact
+        with self._write_session() as session:
+            c = session.query(Contact).filter_by(id=contact_id).first()
+            if c:
+                c.name = name
+                c.email = email
+                c.note = note
+
+    def delete_contact(self, contact_id: int):
+        from db.models import Contact
+        with self._write_session() as session:
+            c = session.query(Contact).filter_by(id=contact_id).first()
+            if c:
+                session.delete(c)
+
+    def get_all_contacts(self):
+        from db.models import Contact
+        from sqlalchemy.orm import joinedload
+        with self._read_session() as session:
+            return session.query(Contact).options(joinedload(Contact.groups)).order_by(Contact.name).all()
+
+    def get_contact(self, contact_id: int):
+        from db.models import Contact
+        from sqlalchemy.orm import joinedload
+        with self._read_session() as session:
+            return session.query(Contact).options(joinedload(Contact.groups)).filter_by(id=contact_id).first()
+
+    # ── Group CRUD ──
+
+    def create_group(self, group_name: str) -> int:
+        from db.models import ContactGroup
+        with self._write_session() as session:
+            g = ContactGroup(group_name=group_name, created_at=datetime.now())
+            session.add(g)
+            session.flush()
+            return g.id
+
+    def update_group(self, group_id: int, group_name: str):
+        from db.models import ContactGroup
+        with self._write_session() as session:
+            g = session.query(ContactGroup).filter_by(id=group_id).first()
+            if g:
+                g.group_name = group_name
+
+    def delete_group(self, group_id: int):
+        from db.models import ContactGroup
+        with self._write_session() as session:
+            g = session.query(ContactGroup).filter_by(id=group_id).first()
+            if g:
+                session.delete(g)
+
+    def get_all_groups(self):
+        from db.models import ContactGroup
+        from sqlalchemy.orm import joinedload
+        with self._read_session() as session:
+            return session.query(ContactGroup).options(joinedload(ContactGroup.contacts)).order_by(ContactGroup.group_name).all()
+
+    def get_group(self, group_id: int):
+        from db.models import ContactGroup
+        from sqlalchemy.orm import joinedload
+        with self._read_session() as session:
+            return session.query(ContactGroup).options(joinedload(ContactGroup.contacts)).filter_by(id=group_id).first()
+
+    # ── Group member ops ──
+
+    def add_contact_to_group(self, contact_id: int, group_id: int):
+        from db.models import Contact, ContactGroup
+        with self._write_session() as session:
+            c = session.query(Contact).filter_by(id=contact_id).first()
+            g = session.query(ContactGroup).filter_by(id=group_id).first()
+            if c and g and g not in c.groups:
+                c.groups.append(g)
+
+    def remove_contact_from_group(self, contact_id: int, group_id: int):
+        from db.models import Contact, ContactGroup
+        with self._write_session() as session:
+            c = session.query(Contact).filter_by(id=contact_id).first()
+            g = session.query(ContactGroup).filter_by(id=group_id).first()
+            if c and g and g in c.groups:
+                c.groups.remove(g)
+
+    def set_contact_groups(self, contact_id: int, group_ids: list):
+        """Replace all groups for a contact."""
+        from db.models import Contact, ContactGroup
+        with self._write_session() as session:
+            c = session.query(Contact).options(
+                __import__('sqlalchemy.orm', fromlist=['joinedload']).joinedload(Contact.groups)
+            ).filter_by(id=contact_id).first()
+            if not c:
+                return
+            groups = session.query(ContactGroup).filter(ContactGroup.id.in_(group_ids)).all() if group_ids else []
+            c.groups = groups
+
+    # ── Email Logs ──
+
+    def add_email_log(self, meeting_id: int, recipient_email: str, status: str, error_msg: str = None) -> int:
+        from db.models import EmailLog
+        with self._write_session() as session:
+            log = EmailLog(
+                meeting_id=meeting_id,
+                recipient_email=recipient_email,
+                status=status,
+                error_msg=error_msg,
+                sent_at=datetime.now(),
+            )
+            session.add(log)
+            session.flush()
+            return log.id
+
+    def get_email_logs(self, meeting_id: int):
+        from db.models import EmailLog
+        with self._read_session() as session:
+            return (
+                session.query(EmailLog)
+                .filter_by(meeting_id=meeting_id)
+                .order_by(EmailLog.sent_at.desc())
+                .all()
+            )

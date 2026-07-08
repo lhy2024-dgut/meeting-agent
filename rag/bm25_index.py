@@ -1,5 +1,7 @@
 """BM25 索引 — 基于 jieba 分词 + rank_bm25 的应用层全文检索"""
 
+import threading
+
 import jieba
 
 from logger import get_logger
@@ -7,13 +9,16 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 _bm25_instance = None
+_bm25_lock = threading.Lock()
 
 
 def get_bm25_index():
-    """返回全局 BM25Index 单例"""
+    """返回全局 BM25Index 单例（双重检查锁定，线程安全）"""
     global _bm25_instance
     if _bm25_instance is None:
-        _bm25_instance = BM25Index()
+        with _bm25_lock:
+            if _bm25_instance is None:
+                _bm25_instance = BM25Index()
     return _bm25_instance
 
 

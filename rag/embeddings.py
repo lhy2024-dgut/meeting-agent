@@ -1,5 +1,6 @@
 """Ollama-based Embedding — 批量请求 + 依赖注入"""
 
+import threading
 from typing import Optional
 
 from langchain_core.embeddings import Embeddings
@@ -11,6 +12,7 @@ from utils import sanitize_text
 logger = get_logger(__name__)
 
 _embedding_model: Optional["OllamaEmbeddings"] = None
+_embedding_lock = threading.Lock()
 
 
 class OllamaEmbeddings(Embeddings):
@@ -45,7 +47,7 @@ class OllamaEmbeddings(Embeddings):
 
 
 def get_embeddings(model=None, base_url=None):
-    """返回 OllamaEmbeddings 实例，支持依赖注入"""
+    """返回 OllamaEmbeddings 实例，支持依赖注入（双重检查锁定，线程安全）"""
     global _embedding_model
     if model or base_url:
         return OllamaEmbeddings(
@@ -53,8 +55,10 @@ def get_embeddings(model=None, base_url=None):
             base_url=base_url or config.OLLAMA_BASE_URL,
         )
     if _embedding_model is None:
-        _embedding_model = OllamaEmbeddings(
-            model=config.EMBEDDING_MODEL,
-            base_url=config.OLLAMA_BASE_URL,
-        )
+        with _embedding_lock:
+            if _embedding_model is None:
+                _embedding_model = OllamaEmbeddings(
+                    model=config.EMBEDDING_MODEL,
+                    base_url=config.OLLAMA_BASE_URL,
+                )
     return _embedding_model
