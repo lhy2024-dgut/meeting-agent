@@ -1,6 +1,7 @@
 """RAG 检索器 — PGVector + BM25 + Reranker + 覆盖式索引 + 依赖注入"""
 
 import hashlib
+import threading
 from datetime import datetime
 
 from sqlalchemy import text
@@ -12,6 +13,7 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 _retriever_instance = None
+_retriever_lock = threading.Lock()
 
 CHUNK_TYPE_ORDER = ["transcript", "minutes", "action_item", "resolution"]
 
@@ -27,7 +29,7 @@ RRF_K = 60
 
 
 def get_retriever(embeddings=None):
-    """返回 Retriever 实例，支持依赖注入"""
+    """返回 Retriever 实例，支持依赖注入（双重检查锁定，线程安全）"""
     global _retriever_instance
     if embeddings:
         try:
@@ -36,13 +38,15 @@ def get_retriever(embeddings=None):
             logger.warning("RAG 初始化失败（注入的 embedding）: %s", e)
             return DummyRetriever()
     if _retriever_instance is None:
-        try:
-            from rag.embeddings import get_embeddings
+        with _retriever_lock:
+            if _retriever_instance is None:
+                try:
+                    from rag.embeddings import get_embeddings
 
-            _retriever_instance = Retriever(get_embeddings())
-        except Exception as e:
-            logger.warning("RAG 初始化失败，知识库功能暂不可用: %s", e)
-            _retriever_instance = DummyRetriever()
+                    _retriever_instance = Retriever(get_embeddings())
+                except Exception as e:
+                    logger.warning("RAG 初始化失败，知识库功能暂不可用: %s", e)
+                    _retriever_instance = DummyRetriever()
     return _retriever_instance
 
 
@@ -299,7 +303,10 @@ class Retriever:
                 ]
                 self._bm25_index.add_documents(meeting_id, bm25_chunks)
             except Exception as e:
-                logger.warning("同步 BM25 索引失败: %s", e)
+                logger.error(
+                    "同步 BM25 索引失败，向量库与关键词库已不一致，重启后将自动从 DB 重建: %s", e
+                )
+                raise
 
         type_counts = {}
         for c in deduped:

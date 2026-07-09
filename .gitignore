@@ -28,6 +28,13 @@ storage/terms/
 理解*.md
 evaluation-plan*.md
 
+# 根目录所有 .md（个人文档/周报/调研报告等，保留 README.md）
+/*.md
+!README.md
+
+# FunASR 源码仓库（嵌套 git repo，不进版本）
+FunASR/
+
 # 调试/临时文件
 _debug_pdf.py
 test_silence.wav

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """独立问答页 — 单场会议问答 / 跨会议检索"""
 
+import html
 import streamlit as st
 
 from agents.chat_agent import ChatAgent
@@ -187,11 +188,12 @@ def _cross_meeting_chat(meetings):
 
 def _render_messages(messages, show_rag=False, cross_mode=False):
     for msg in messages:
+        safe_content = html.escape(msg["content"])
         if msg["role"] == "assistant":
             st.markdown(
                 '<div class="chat-bubble-assistant">'
                 "<strong>助手</strong><br>"
-                f"{msg['content']}"
+                f"{safe_content}"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -201,7 +203,7 @@ def _render_messages(messages, show_rag=False, cross_mode=False):
             st.markdown(
                 '<div class="chat-bubble-user" style="margin-left:32px">'
                 "<strong>你</strong><br>"
-                f"{msg['content']}"
+                f"{safe_content}"
                 "</div>",
                 unsafe_allow_html=True,
             )

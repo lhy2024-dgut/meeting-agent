@@ -21,17 +21,24 @@ def get_engine(url=None):
     return engine
 
 
+_vector_extension_ensured = False
+
+
 def _register_vector_adapters(engine):
-    """在 psycopg2 连接上注册 pgvector 类型适配器"""
+    """在 psycopg2 连接上注册 pgvector 类型适配器，扩展只在首次连接时创建一次"""
+    global _vector_extension_ensured
     try:
         from pgvector.psycopg2 import register_vector
 
         @event.listens_for(engine, "connect")
         def _on_connect(dbapi_connection, _connection_record):
+            global _vector_extension_ensured
             try:
-                dbapi_connection.autocommit = True
-                dbapi_connection.cursor().execute("CREATE EXTENSION IF NOT EXISTS vector")
-                dbapi_connection.autocommit = False
+                if not _vector_extension_ensured:
+                    dbapi_connection.autocommit = True
+                    dbapi_connection.cursor().execute("CREATE EXTENSION IF NOT EXISTS vector")
+                    dbapi_connection.autocommit = False
+                    _vector_extension_ensured = True
                 register_vector(dbapi_connection)
             except Exception:
                 pass

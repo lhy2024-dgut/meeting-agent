@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会议纪要 - AI桌面搭子产品评审</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { background-color: #F7F8FA; color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 12px; font-size: 12px; }
+.header { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid #EBEBEB; margin-bottom: 16px; }
+.header-title { font-size: 20px; font-weight: bold; color: #006EFF; }
+.header-attendees { font-size: 12px; color: #888; }
+.summary { font-size: 12px; background-color: #F2F7FF; border-left: 3px solid #006EFF; border-radius: 0 6px 6px 0; padding: 10px 12px; margin-bottom: 16px; line-height: 1.6; color: #333; }
+.logic-chain { display: flex; flex-wrap: nowrap; align-items: stretch; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.chain-node { flex: 1; min-width: 0; background: #FFF; border: 1px solid #EBEBEB; border-radius: 6px; padding: 10px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+.chain-node h4 { margin: 0 0 4px 0; font-size: 12px; color: #006EFF; display: flex; align-items: center; gap: 4px; }
+.chain-node p { margin: 0; font-size: 11px; color: #555; line-height: 1.5; font-weight: bold; }
+.chain-arrow { display: flex; align-items: center; justify-content: center; color: #C0C4CC; font-size: 16px; font-weight: bold; padding: 0 2px; flex-shrink: 0; }
+.module-block { background-color: #FFF; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.03); }
+.module-title { font-size: 15px; font-weight: bold; margin: 0 0 12px 0; color: #111; display: flex; align-items: center; gap: 6px; }
+.density-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.density-table th { color: #111; font-weight: 700; padding: 8px 10px; border-bottom: 1px solid #F0F0F0; background-color: #F8F9FA; }
+.density-table td { padding: 8px 10px; border-bottom: 1px solid #F0F0F0; color: #333; line-height: 1.5; }
+.density-table tr:last-child td { border-bottom: none; }
+.insight-stack { display: flex; flex-direction: column; gap: 8px; }
+.insight-item { position: relative; padding: 10px 14px 10px 28px; border-radius: 6px; font-size: 12px; color: #222; line-height: 1.5; border: 1px solid transparent; }
+.insight-item::before { content: '✦'; position: absolute; left: 10px; top: 10px; font-size: 12px; }
+.insight-item:nth-child(4n+1) { background-color: #FFF9F0; border-color: #FFE4C4; }
+.insight-item:nth-child(4n+1)::before { color: #FF9D00; }
+.insight-item:nth-child(4n+2) { background-color: #F4FBF7; border-color: #C3E6CB; }
+.insight-item:nth-child(4n+2)::before { color: #00A870; }
+.insight-item:nth-child(4n+3) { background-color: #F8F6FF; border-color: #D8D0FF; }
+.insight-item:nth-child(4n+3)::before { color: #7B61FF; }
+.insight-item:nth-child(4n+4) { background-color: #F0F6FF; border-color: #C2D7FF; }
+.insight-item:nth-child(4n+4)::before { color: #006EFF; }
+.todo-title { color: #00B3A1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">AI桌面搭子产品启动页评审与运营规划</div>
+  <div class="header-attendees">👥 孙其瑞、莫健弘、冯羽亨、刘涵月、刘根明</div>
+</div>
+
+<div class="summary">
+  团队评审AI桌面搭子初版启动页与用户信息收集流程，讨论API Key内置方案、产品聚焦单场景（如PPT/备考引导）及情绪化交互设计；确定前期运营通过校园渠道引流，官网承载下载与用户idea公示，并提前用设计稿做预热宣发。
+</div>
+
+<!-- 横向逻辑链 -->
+<div class="logic-chain">
+  <div class="chain-node">
+    <h4>🔧 技术基建</h4>
+    <p>内置免费API Key，加快网关联调</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>🎯 产品聚焦</h4>
+    <p>单场景深耕+引导式情绪交互</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>📣 运营预热</h4>
+    <p>校园渠道引流+设计稿逐曝</p>
+  </div>
+  <div class="chain-arrow">➔</div>
+  <div class="chain-node">
+    <h4>🖼️ UI设计</h4>
+    <p>去工程化，输出原型图支撑宣发</p>
+  </div>
+</div>
+
+<!-- 模块1 技术基建 -->
+<div class="module-block">
+  <div class="module-title">🔧 技术基建 —— API Key方案与研发进度</div>
+  <table class="density-table">
+    <thead>
+      <tr><th>事项</th><th>决策/现状</th><th>风险说明</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>大模型 API Key</td>
+        <td>内置免费Key（如讯飞/小米类），用户可自定义</td>
+        <td>免费额度政策变动需关注</td>
+      </tr>
+      <tr>
+        <td>BigCloud 网关连通</td>
+        <td>已连通，此前存在 gateway 连不上问题</td>
+        <td>初期联调耗时偏长</td>
+      </tr>
+      <tr>
+        <td>启动页与配置页</td>
+        <td>研发遇阻，进度偏慢，引导页制作中</td>
+        <td>需加速以免影响运营节奏</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 模块2 产品聚焦 -->
+<div class="module-block">
+  <div class="module-title">🎯 产品聚焦 —— 场景选择与情绪化交互设计</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>单场景先打透</strong>：首选学生高频场景（做PPT、备考出题讲解），暂不铺太泛，先做透一个角色互动闭环。</div>
+    <div class="insight-item"><strong>引导式主动交互</strong>：AI主动提问、分步讲解、适时调侃，生成中持续反馈，而非等待用户问完再答。</div>
+    <div class="insight-item"><strong>不对外宣传情绪</strong>：对外主打"桌面搭子/陪伴助手"，情绪价值由用户使用感知得出，避免承诺过度。</div>
+    <div class="insight-item"><strong>用户信息收集</strong>：除姓名/语言外补充年级、作息等标签，支撑后续个性化引导，初版暂简化后续补回。</div>
+  </div>
+</div>
+
+<!-- 模块3 运营预热 -->
+<div class="module-block">
+  <div class="module-title">📣 运营预热 —— 校园引流与官网功能规划</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>校园渠道获客</strong>：通过《创业基础》课程群、校园墙投放招募文案与海报，引导至官网下载并加体验群。</div>
+    <div class="insight-item"><strong>官网轻量化</strong>：仅做下载入口+加群入口+用户idea看板（待开发/进行中/已完成+致谢ID）。</div>
+    <div class="insight-item"><strong>内测激励</strong>：宣称未来可能收费，内测用户享永久免费+抢先体验+赠送Token，提升参与意愿。</div>
+    <div class="insight-item"><strong>KOL种子用户</strong>：同步挖掘同频早期用户，重点服务积极反馈者，用其意见驱动首轮迭代。</div>
+  </div>
+</div>
+
+<!-- 模块4 UI设计 -->
+<div class="module-block">
+  <div class="module-title">🖼️ UI设计 —— 原型图产出与电影式逐曝宣发</div>
+  <div class="insight-stack">
+    <div class="insight-item"><strong>去工程化视觉</strong>：启动页加强动感与情绪氛围，界面向陪伴型产品对标，减少冷硬工具感。</div>
+    <div class="insight-item"><strong>输出原型图</strong>：按启动页→配置页→主界面顺序出Figma/原型图，直接用于运营预热图。</div>
+    <div class="insight-item"><strong>电影式逐曝</strong>：产品未完成前分期放出设计稿局部截图（遮一部分），营造期待，类比新品发布会预热。</div>
+    <div class="insight-item"><strong>贴合大学生审美</strong>：针对学生群体做视觉风格调研，确认配色与角色人设后再全面铺开。</div>
+  </div>
+</div>
+
+<!-- 待办 -->
+<div class="module-block">
+  <div class="module-title todo-title">📝 待办事项</div>
+  <table class="density-table">
+    <thead>
+      <tr><th>事项</th><th>责任人</th><th>截止时间</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>加速网关联调与启动页/配置页开发</td><td>冯羽亨</td><td>待定</td></tr>
+      <tr><td>确定首版聚焦场景（PPT或备考），输出原型图</td><td>莫健弘、刘涵月</td><td>待定</td></tr>
+      <tr><td>制作设计稿局部图，启动校园渠道预热宣发</td><td>莫健弘、刘涵月</td><td>待定</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

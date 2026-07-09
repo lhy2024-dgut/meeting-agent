@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -69,3 +70,44 @@ class MeetingChunk(Base):
     content_hash = Column(String(64), nullable=False, default="")
     embedding = Column(Vector(1024))
     created_at = Column(DateTime)
+
+
+contact_group_members = Table(
+    "contact_group_members",
+    Base.metadata,
+    Column("contact_id", Integer, ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", Integer, ForeignKey("contact_groups.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    email = Column(String(255), nullable=False, unique=True)
+    note = Column(Text)
+    created_at = Column(DateTime)
+
+    groups = relationship("ContactGroup", secondary=contact_group_members, back_populates="contacts")
+
+
+class ContactGroup(Base):
+    __tablename__ = "contact_groups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime)
+
+    contacts = relationship("Contact", secondary=contact_group_members, back_populates="groups")
+
+
+class EmailLog(Base):
+    __tablename__ = "email_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_email = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    error_msg = Column(Text)
+    sent_at = Column(DateTime)

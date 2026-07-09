@@ -34,18 +34,20 @@ PAGE_MAP = {
     "chat": "ui.chat",
     "history": "ui.history",
     "stats": "ui.stats",
+    "contacts": "ui.contacts",
 }
 
 module_name = PAGE_MAP.get(st.session_state.page, "ui.home")
 import importlib
 import sys
 
-# 清除项目模块缓存，确保文件改动后热重载立即生效
-# 先对 sys.modules 做快照，避免后台线程并发导入时触发 "dictionary changed size during iteration"
-_RELOAD_PREFIXES = ("ui.", "chains.", "services.", "prompts.", "engines.", "agents.", "rag.")
-_mods_to_reload = [k for k in list(sys.modules.keys()) if any(k.startswith(p) for p in _RELOAD_PREFIXES)]
-for _mod in _mods_to_reload:
-    sys.modules.pop(_mod, None)
+# 仅在 DEBUG 模式下热重载项目模块，避免生产环境每次路由切换都销毁单例（Whisper/Embeddings/LLM）
+import os as _os
+if _os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
+    _RELOAD_PREFIXES = ("ui.", "chains.", "services.", "prompts.", "engines.", "agents.", "rag.")
+    _mods_to_reload = [k for k in list(sys.modules.keys()) if any(k.startswith(p) for p in _RELOAD_PREFIXES)]
+    for _mod in _mods_to_reload:
+        sys.modules.pop(_mod, None)
 
 module = importlib.import_module(module_name)
 
@@ -58,6 +60,7 @@ FUNC_MAP = {
     "chat": "page_chat",
     "history": "page_history",
     "stats": "page_stats",
+    "contacts": "page_contacts",
 }
 
 func_name = FUNC_MAP.get(st.session_state.page)

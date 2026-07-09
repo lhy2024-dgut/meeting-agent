@@ -1,6 +1,7 @@
 """Ollama LLM 封装 — 绕过 langchain-ollama 解析 bug，支持依赖注入"""
 
 import os
+import threading
 
 # 确保 localhost Ollama 连接不走系统代理（兼容 Clash/V2Ray 等软件开启系统代理的场景）
 _no_proxy = os.environ.get("NO_PROXY", os.environ.get("no_proxy", ""))
@@ -149,10 +150,11 @@ class OllamaChatModel(BaseChatModel):
 # ---------------------------------------------------------------------------
 
 _llm_instance = None
+_llm_lock = threading.Lock()
 
 
 def get_llm(model=None, base_url=None, temperature=0.1, force_new=False):
-    """返回 OllamaChatModel 实例，支持依赖注入覆盖"""
+    """返回 OllamaChatModel 实例，支持依赖注入覆盖（双重检查锁定，线程安全）"""
     global _llm_instance
     if model or base_url or force_new:
         import config
@@ -163,11 +165,13 @@ def get_llm(model=None, base_url=None, temperature=0.1, force_new=False):
             num_predict=4096,
         )
     if _llm_instance is None:
-        import config
-        _llm_instance = OllamaChatModel(
-            model=config.LLM_MODEL,
-            base_url=config.OLLAMA_BASE_URL,
-            temperature=temperature,
-            num_predict=4096,
-        )
+        with _llm_lock:
+            if _llm_instance is None:
+                import config
+                _llm_instance = OllamaChatModel(
+                    model=config.LLM_MODEL,
+                    base_url=config.OLLAMA_BASE_URL,
+                    temperature=temperature,
+                    num_predict=4096,
+                )
     return _llm_instance

@@ -18,6 +18,7 @@ def render_header():
         ("chat", "💬 问答"),
         ("history", "📚 历史"),
         ("stats", "📊 统计"),
+        ("contacts", "👥 联系人"),
     ]
     for i, (page_key, label) in enumerate(nav_pages, start=1):
         is_active = st.session_state.get("page") == page_key

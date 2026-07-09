@@ -64,8 +64,13 @@ class MeetingService:
     ):
         """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
         cached = self.db.get_meeting_by_hash(file_hash)
-        if not terms and cached and any(
-            [cached.minutes_text, cached.action_items_text, cached.resolutions_text]
+        _default_scene = "通用会议"
+        if (
+            not terms
+            and (scene == _default_scene or not scene)
+            and not custom_headings
+            and cached
+            and any([cached.minutes_text, cached.action_items_text, cached.resolutions_text])
         ):
             return self._handle_cache_hit(cached, output_format, template_path, progress_callback)
 

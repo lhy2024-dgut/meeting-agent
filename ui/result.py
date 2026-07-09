@@ -53,7 +53,7 @@ def page_result():
         )
         return
 
-    c1, c2, c3, c4 = st.columns([0.6, 2.6, 1.2, 1.2])
+    c1, c2, c3, c4, c5 = st.columns([0.6, 2.2, 1.1, 1.0, 1.0])
     with c1:
         if st.button("← 返回", key="back_home", type="tertiary", width="stretch"):
             st.session_state.page = "home"
@@ -119,8 +119,22 @@ def page_result():
     with c4:
         if st.button("🎨 预览样式", key="btn_preview_style", width="stretch"):
             _show_template_preview()
+    with c5:
+        email_active = st.session_state.get("show_email_panel", False)
+        if st.button(
+            "✖ 关闭发送" if email_active else "📧 发送邮件",
+            key="btn_email_toggle",
+            width="stretch",
+            type="primary" if email_active else "secondary",
+        ):
+            st.session_state.show_email_panel = not email_active
+            st.rerun()
 
     st.divider()
+
+    if st.session_state.get("show_email_panel") and data.get("meeting_id"):
+        _render_email_panel(data)
+        st.divider()
 
     segments = st.session_state.get("segments", data.get("segments", []))
     if segments:
@@ -517,12 +531,13 @@ def _render_html_summary_section(data: dict):
                         st.error(f"生成失败：{err}")
                         return
                     st.session_state[cache_key] = html_out
-                    cached_html = html_out
                     if err:
-                        st.warning(f"生成完成（警告：{err}）")
+                        st.toast(f"生成完成（警告：{err}）", icon="⚠️")
                 except Exception as exc:
                     st.error(f"生成异常：{exc}")
                     return
+            # 强制重渲，让邮件面板能读到刚写入 session_state 的 viz
+            st.rerun()
 
         if cached_html:
             _render_html_viz(cached_html, data.get("title", "会议纪要"), cache_key, view_mode)
@@ -692,3 +707,250 @@ def _md_to_html(text: str) -> str:
     html = re.sub(r"^\- (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
     html = html.replace("\n\n", "</p><p>").replace("\n", "<br>")
     return f"<p>{html}</p>"
+
+
+# ─────────────────────────────────────────────────────────────────
+# 邮件发送面板
+# ─────────────────────────────────────────────────────────────────
+
+def _render_email_panel(data: dict):
+    """邮件发送面板：联系人/群组选择 → 附件选项 → 发送 → 结果展示"""
+    import os
+    import tempfile
+
+    from db.repository import ContactRepository
+    from services.email_service import EmailService, _check_smtp_config, build_email_html
+
+    # 配置检查
+    ok, cfg_err = _check_smtp_config()
+
+    with st.container(border=True):
+        st.markdown(
+            '<div style="font-size:16px;font-weight:700;color:#1E293B;margin-bottom:0.75rem">'
+            "📧 发送会议纪要邮件</div>",
+            unsafe_allow_html=True,
+        )
+
+        if not ok:
+            st.warning(f"SMTP 未配置：{cfg_err}")
+            st.caption(
+                "请在项目根目录 .env 文件中设置 SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM"
+            )
+            return
+
+        db = ContactRepository()
+        contacts = db.get_all_contacts()
+        groups = db.get_all_groups()
+
+        col_recv, col_att = st.columns([3, 2])
+
+        # ── 收件人 ──
+        with col_recv:
+            st.markdown("**收件人**")
+            recv_mode = st.radio(
+                "recv_mode",
+                ["按联系人选择", "按群组批量发送"],
+                horizontal=True,
+                key="email_recv_mode",
+                label_visibility="collapsed",
+            )
+
+            if recv_mode == "按联系人选择":
+                if not contacts:
+                    st.info("暂无联系人 — 请先在「联系人」页面添加")
+                    return
+                sel_cids = st.multiselect(
+                    "收件人",
+                    options=[c.id for c in contacts],
+                    format_func=lambda cid: next(
+                        (f"{c.name}  <{c.email}>" for c in contacts if c.id == cid), str(cid)
+                    ),
+                    key="email_sel_contacts",
+                    placeholder="输入姓名或邮箱搜索...",
+                    label_visibility="collapsed",
+                )
+                recipients = [c.email for c in contacts if c.id in sel_cids]
+            else:
+                if not groups:
+                    st.info("暂无群组 — 请先在「联系人」页面创建群组")
+                    return
+                sel_gids = st.multiselect(
+                    "群组",
+                    options=[g.id for g in groups],
+                    format_func=lambda gid: next(
+                        (f"{g.group_name}  ({len(g.contacts)} 人)" for g in groups if g.id == gid), str(gid)
+                    ),
+                    key="email_sel_groups",
+                    placeholder="搜索群组名称...",
+                    label_visibility="collapsed",
+                )
+                # 展开所有群组成员，去重
+                recipients = list({
+                    c.email
+                    for g in groups if g.id in sel_gids
+                    for c in g.contacts
+                })
+
+            if recipients:
+                preview = ", ".join(recipients[:4])
+                if len(recipients) > 4:
+                    preview += f" 等 {len(recipients)} 人"
+                st.caption(f"共 {len(recipients)} 个收件人：{preview}")
+
+        # ── 附件选项 ──
+        with col_att:
+            st.markdown("**附件**")
+
+            html_cache_key = f"html_viz_{data.get('meeting_id', '')}"
+            has_viz_html = bool(st.session_state.get(html_cache_key))
+            inc_viz_html = st.checkbox(
+                "可视化 HTML 纪要",
+                value=has_viz_html,
+                disabled=not has_viz_html,
+                key="email_inc_viz_html",
+                help="需先在结果页点击「✨ 生成可视化纪要」" if not has_viz_html else "将可视化纪要作为 HTML 附件发送",
+            )
+
+            output_path = st.session_state.get("output_path") or ""
+            _p = Path(output_path) if output_path else None
+            cur_fmt = _p.suffix.lstrip(".") if (_p and _p.exists()) else None
+            has_minutes = bool(data.get("minutes", "").strip())
+
+            if cur_fmt:
+                doc_label = f"文档附件（{cur_fmt.upper()}）"
+                doc_help = f"将当前 {cur_fmt} 文件作为附件"
+            elif has_minutes:
+                doc_label = "文档附件（自动生成 DOCX）"
+                doc_help = "发送时自动从纪要内容生成 DOCX 附件"
+            else:
+                doc_label = "文档附件（无纪要内容）"
+                doc_help = "纪要内容为空，无法生成文档"
+
+            inc_doc = st.checkbox(
+                doc_label,
+                value=bool(cur_fmt or has_minutes),
+                disabled=not bool(cur_fmt or has_minutes),
+                key="email_inc_doc",
+                help=doc_help,
+            )
+
+        # ── 邮件主题 ──
+        st.markdown("**邮件主题**")
+        default_subject = f"【会议纪要】{data.get('title', '会议纪要')}  —  {data.get('date', '')}"
+        subject = st.text_input(
+            "subject",
+            value=default_subject,
+            key="email_subject",
+            label_visibility="collapsed",
+        )
+
+        col_send, col_status = st.columns([1, 3])
+        with col_send:
+            send_clicked = st.button(
+                "📤 发送",
+                key="btn_email_send_exec",
+                type="primary",
+                use_container_width=True,
+                disabled=not recipients or not subject.strip(),
+            )
+
+        if not send_clicked:
+            return
+
+        # ── 执行发送 ──
+        minutes = data.get("minutes", "")
+        action_items = data.get("action_items", "")
+        resolutions = data.get("resolutions", "")
+        title = data.get("title", "")
+        date_str = data.get("date", "")
+
+        body_text = (
+            f"会议纪要：{title}\n日期：{date_str}\n\n"
+            f"=== 会议纪要 ===\n{minutes}\n\n"
+            f"=== 待办事项 ===\n{action_items}\n\n"
+            f"=== 会议决议 ===\n{resolutions}"
+        )
+        body_html = build_email_html(title, date_str, minutes, action_items, resolutions)
+
+        # 构建附件列表
+        attachments = []
+        tmp_html_path = None
+
+        if inc_viz_html:
+            viz_html = st.session_state.get(html_cache_key, "")
+            if viz_html:
+                fd, tmp_html_path = tempfile.mkstemp(suffix=".html")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(viz_html)
+                attachments.append(tmp_html_path)
+
+        if inc_doc:
+            if cur_fmt and _p and _p.exists():
+                attachments.append(str(_p))
+            elif has_minutes:
+                # 临时生成 DOCX
+                try:
+                    from chains.export_chain import ExportChain
+                    exporter = ExportChain()
+                    tmp_doc_path = exporter.run(
+                        {
+                            "meeting_id": data.get("meeting_id"),
+                            "title": data.get("title", "会议纪要"),
+                            "date": data.get("date", ""),
+                            "minutes": data.get("minutes", ""),
+                            "action_items": data.get("action_items", ""),
+                            "resolutions": data.get("resolutions", ""),
+                        },
+                        output_format="docx",
+                    )
+                    attachments.append(tmp_doc_path)
+                    st.session_state.output_path = tmp_doc_path
+                except Exception as exc:
+                    st.warning(f"文档生成失败，跳过附件：{exc}")
+
+        # 逐个发送
+        svc = EmailService()
+        db_log = ContactRepository()
+        meeting_id = data.get("meeting_id")
+        results = []
+
+        progress = st.progress(0, text="准备发送...")
+        for idx, addr in enumerate(recipients):
+            ok_send, err_msg = svc.send(
+                to_email=addr,
+                subject=subject.strip(),
+                body_text=body_text,
+                body_html=body_html,
+                attachments=attachments,
+            )
+            results.append({"email": addr, "success": ok_send, "error": err_msg})
+            if meeting_id:
+                db_log.add_email_log(
+                    meeting_id, addr,
+                    "success" if ok_send else "failed",
+                    err_msg,
+                )
+            progress.progress(
+                (idx + 1) / len(recipients),
+                text=f"已发送 {idx + 1}/{len(recipients)}",
+            )
+
+        # 清理临时文件
+        if tmp_html_path:
+            try:
+                os.unlink(tmp_html_path)
+            except OSError:
+                pass
+
+        # 展示结果
+        success_n = sum(1 for r in results if r["success"])
+        fail_n = len(results) - success_n
+
+        if fail_n == 0:
+            st.success(f"全部发送成功！共 {success_n} 封")
+        else:
+            st.warning(f"发送完成：{success_n} 成功，{fail_n} 失败")
+            with st.expander("查看失败详情", expanded=True):
+                for r in results:
+                    if not r["success"]:
+                        st.error(f"{r['email']}：{r['error']}")

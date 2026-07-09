@@ -5,8 +5,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from faster_whisper import WhisperModel
 
@@ -14,6 +15,18 @@ import config
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+# 线程本地存储：每个线程持有自己的 WhisperModel，避免跨线程共享非线程安全模型
+_thread_local = threading.local()
+
+
+def _get_thread_whisper_model(model_name, device, compute_type):
+    """获取当前线程的 WhisperModel 实例，首次调用时加载（同一线程复用）"""
+    key = f"{model_name}|{device}|{compute_type}"
+    if getattr(_thread_local, "model_key", None) != key:
+        _thread_local.model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        _thread_local.model_key = key
+    return _thread_local.model
 
 
 def _find_exe(name: str) -> str:
@@ -191,10 +204,15 @@ def _split_audio_ffmpeg(audio_path: str, duration_s: float) -> tuple:
 
 
 def _transcribe_chunk_worker(args: tuple) -> dict:
-    """Worker executed in a subprocess for long-audio parallel transcription."""
+    """Worker executed in a thread for long-audio parallel transcription.
+
+    Uses thread-local WhisperModel so each thread loads the model only once.
+    Threads share the same process address space, so OS-level mmap deduplication
+    keeps physical memory for read-only model weights at ~1x (vs N×processes).
+    """
     chunk_index, chunk_path, start_offset_s, model_name, device, compute_type, language, prompt = args
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        model = _get_thread_whisper_model(model_name, device, compute_type)
         segments_gen, _ = model.transcribe(
             chunk_path,
             language=language,
@@ -271,7 +289,10 @@ def _get_audio_info(audio_path):
                         "frame_tags=lavfi.r128.I",
                         "-f",
                         "lavfi",
-                        f"amovie={audio_path},ebur128=metadata=1",
+                        # lavfi amovie= 使用单引号包裹路径，支持含空格的文件名
+                        "amovie='{path}',ebur128=metadata=1".format(
+                            path=audio_path.replace("'", "\\'")
+                        ),
                     ],
                     capture_output=True,
                     text=False,
@@ -381,7 +402,7 @@ class ASREngine:
 
         results: dict[int, dict] = {}
         try:
-            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 futures = {executor.submit(_transcribe_chunk_worker, task): task[0] for task in tasks}
                 for future in as_completed(futures):
                     result = future.result()

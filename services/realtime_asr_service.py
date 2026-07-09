@@ -25,6 +25,34 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
+# 短名 → ModelScope 缓存子目录（iic/xxx）的映射表
+_MODEL_ALIASES: dict[str, str] = {
+    "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online":
+        "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "paraformer-zh-streaming":
+        "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "ct-punc":
+        "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+    "fsmn-vad":
+        "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "cam++":
+        "iic/speech_campplus_sv_zh-cn_16k-common",
+    "paraformer-zh":
+        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+}
+
+
+def _local_model(name: str) -> str:
+    """若本地缓存存在则返回绝对路径，否则原样返回 name（触发在线下载）。"""
+    subdir = _MODEL_ALIASES.get(name, name)
+    local = config.FUNASR_MODEL_DIR / subdir
+    if local.exists():
+        logger.debug("使用本地模型: %s", local)
+        return str(local)
+    logger.warning("本地未找到模型 %s（路径: %s），将尝试在线下载", name, local)
+    return name
+
+
 SAMPLE_RATE = 16000        # Hz，FunASR 要求 16 kHz
 SD_BLOCK_SAMPLES = 1024    # sounddevice 回调粒度（约 64ms）
 CHUNK_STRIDE = 10 * 960    # 9 600 samples = 600ms，paraformer-zh-streaming 标准步长
@@ -54,39 +82,29 @@ class RealtimeASRService:
     def _init_asr(self):
         if self._asr_model is not None:
             return
-        logger.info("加载 FunASR paraformer-zh-streaming（首次需下载模型）...")
+        from funasr import AutoModel
+        model_path = _local_model("iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online")
+        logger.info("加载 FunASR paraformer-zh-streaming: %s", model_path)
         try:
-            from funasr import AutoModel
-            for kwargs in [
-                {"model": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online"},
-                {"model": "paraformer-zh-streaming", "model_revision": "v2.0.4"},
-                {"model": "paraformer-zh-streaming", "hub": "hf"},
-            ]:
-                try:
-                    self._asr_model = AutoModel(disable_update=True, **kwargs)
-                    logger.info("FunASR 加载完成（%s）", kwargs["model"])
-                    return
-                except Exception as exc:
-                    logger.warning("FunASR 来源 %s 失败: %s", kwargs.get("model"), exc)
-            raise RuntimeError("所有 FunASR 模型来源均失败，请检查网络或手动下载模型。")
-        except RuntimeError:
-            raise
+            self._asr_model = AutoModel(model=model_path, disable_update=True)
+            logger.info("FunASR 流式 ASR 加载完成")
         except Exception as exc:
             raise RuntimeError(f"FunASR 加载失败: {exc}") from exc
 
     def _init_punc_model(self):
         if self._punc_model is not None:
             return
-        logger.info("加载 ct-punc 标点模型...")
+        from funasr import AutoModel
+        model_path = _local_model("ct-punc")
+        logger.info("加载 ct-punc 标点模型: %s", model_path)
         try:
-            from funasr import AutoModel
-            self._punc_model = AutoModel(model="ct-punc", disable_update=True)
+            self._punc_model = AutoModel(model=model_path, disable_update=True)
             logger.info("ct-punc 加载完成")
         except Exception as exc:
             logger.warning("ct-punc 加载失败，将跳过标点恢复: %s", exc)
 
     def initialize(self):
-        """预加载流式 ASR 模型（首次耗时约 30–60s）。"""
+        """预加载流式 ASR 模型。"""
         self._init_asr()
 
     # ── 离线说话人识别模型加载 ────────────────────────────────────────────────
@@ -94,14 +112,14 @@ class RealtimeASRService:
     def _init_spk_model(self):
         if self._spk_model is not None:
             return
-        logger.info("加载 FunASR 离线说话人识别管道（paraformer-zh + fsmn-vad + ct-punc + cam++）...")
+        from funasr import AutoModel
+        logger.info("加载 FunASR 离线说话人识别管道...")
         try:
-            from funasr import AutoModel
             self._spk_model = AutoModel(
-                model="paraformer-zh",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
-                spk_model="cam++",
+                model=_local_model("paraformer-zh"),
+                vad_model=_local_model("fsmn-vad"),
+                punc_model=_local_model("ct-punc"),
+                spk_model=_local_model("cam++"),
                 disable_update=True,
             )
             logger.info("说话人识别模型加载完成")

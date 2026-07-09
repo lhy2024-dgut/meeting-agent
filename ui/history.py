@@ -130,6 +130,8 @@ def page_history():
                             st.session_state[confirm_key] = True
                             st.rerun()
 
+        _render_email_log(m.id)
+
     # 分页导航
     total_pages = max(1, (total + page_size - 1) // page_size)
     if total_pages > 1:
@@ -148,6 +150,46 @@ def page_history():
             if st.button("下一页 →", disabled=page >= total_pages - 1, width='stretch', type="secondary"):
                 st.session_state[page_key] = min(total_pages - 1, page + 1)
                 st.rerun()
+
+
+def _render_email_log(meeting_id: int):
+    """在历史页显示该会议的邮件发送记录（懒加载）"""
+    try:
+        from db.repository import ContactRepository
+        db_c = ContactRepository()
+        logs = db_c.get_email_logs(meeting_id)
+    except Exception:
+        return
+
+    if not logs:
+        return
+
+    success_n = sum(1 for l in logs if l.status == "success")
+    fail_n = len(logs) - success_n
+    label = f"📧 发送记录（{len(logs)} 封 · {success_n} 成功"
+    if fail_n:
+        label += f" · {fail_n} 失败"
+    label += "）"
+
+    with st.expander(label, expanded=False):
+        for log in logs[:20]:
+            ts = log.sent_at.strftime("%m-%d %H:%M") if log.sent_at else "—"
+            if log.status == "success":
+                st.markdown(
+                    f'<div style="font-size:13px;color:#059669">&#10003; {log.recipient_email}'
+                    f'<span style="color:#94A3B8;margin-left:8px">{ts}</span></div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                err = (log.error_msg or "")[:60]
+                st.markdown(
+                    f'<div style="font-size:13px;color:#DC2626">&#10007; {log.recipient_email}'
+                    f'<span style="color:#94A3B8;margin-left:8px">{ts}</span>'
+                    f'<span style="color:#DC2626;margin-left:8px;font-size:12px">{err}</span></div>',
+                    unsafe_allow_html=True,
+                )
+        if len(logs) > 20:
+            st.caption(f"仅显示最近 20 条，共 {len(logs)} 条记录")
 
 
 def _render_project_name(db: MeetingRepository, meeting):

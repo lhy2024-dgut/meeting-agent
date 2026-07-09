@@ -61,6 +61,23 @@ MIN_RERANK_SCORE = float(os.getenv("MIN_RERANK_SCORE", "0"))
 # Hybrid 检索召回宽度倍数
 RECALL_MULTIPLIER = int(os.getenv("RECALL_MULTIPLIER", "4"))
 
+# FunASR 模型缓存目录（默认 ModelScope 标准路径，可通过 FUNASR_MODEL_DIR 覆盖）
+# 实际路径示例：C:\Users\<用户>\.cache\modelscope\hub\models
+# 可改为项目内路径，如 storage/funasr_models，然后把模型文件夹复制过去
+FUNASR_MODEL_DIR = Path(
+    os.getenv(
+        "FUNASR_MODEL_DIR",
+        str(Path.home() / ".cache" / "modelscope" / "hub" / "models"),
+    )
+)
+
 # Labels
 DURATION_LABELS = {"short": "短会", "medium": "中等", "long": "长会"}
 ENV_LABELS = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}
+
+# Email (SMTP)
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "")

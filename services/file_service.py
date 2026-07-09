@@ -17,10 +17,21 @@ class FileService:
         self.template_dir = template_dir or config.TEMPLATE_DIR
 
     def save_uploaded(self, uploaded_file, file_type="audio"):
+        allowed_map = {
+            "audio": set(config.ALLOWED_AUDIO_EXTENSIONS),
+            "video": set(config.ALLOWED_VIDEO_EXTENSIONS),
+            "template": set(config.ALLOWED_TEMPLATE_EXTENSIONS),
+        }
+        ext = Path(uploaded_file.name).suffix.lower()
+        allowed = allowed_map.get(file_type, set())
+        if allowed and ext not in allowed:
+            raise ValueError(
+                f"不支持的文件类型: {ext}，仅允许: {', '.join(sorted(allowed))}"
+            )
+
         file_bytes = uploaded_file.getvalue()
         file_hash = hashlib.sha256(file_bytes).hexdigest()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ext = Path(uploaded_file.name).suffix.lower()
         filename = f"{timestamp}_{file_hash[:8]}{ext}"
 
         save_dir = {
