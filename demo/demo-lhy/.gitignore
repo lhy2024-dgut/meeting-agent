@@ -1,0 +1,5 @@
+.env
+storage/audio/
+storage/output/
+__pycache__/
+*.pyc

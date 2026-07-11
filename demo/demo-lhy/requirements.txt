@@ -1,0 +1,8 @@
+openai-whisper
+requests
+psycopg2-binary
+docxtpl
+python-docx
+reportlab
+streamlit
+python-dotenv

@@ -1,0 +1,39 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+psycopg2-binary
+faster-whisper
+pandas
+plotly
+# pydub 已移除 — 改用 ffprobe（ffmpeg 自带）获取音频信息
+langchain-core
+langgraph
+docxtpl
+python-docx
+PyMuPDF
+pypdf
+ollama
+pgvector
+python-dotenv
+alembic
+bcrypt
+PyJWT
+# RAG 检索优化
+transformers
+rank_bm25
+jieba
+torch
+# Reranker 依赖（transformers 底层需要 torch，faster-whisper 已传递安装）
+# 如未安装: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# SenseVoiceSmall (FunASR)
+funasr
+modelscope
+torchaudio
+more-itertools
+# 实时录音采集
+sounddevice
+# WER/CER 测试
+jiwer
+# HTML 纪要校验
+beautifulsoup4
