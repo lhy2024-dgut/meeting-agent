@@ -25,6 +25,75 @@ export type MeetingMutationResponse = {
   success: boolean;
 };
 
+export type ContactGroupSummary = {
+  id: number;
+  group_name: string;
+  member_count: number;
+};
+
+export type Contact = {
+  id: number;
+  name: string;
+  email: string;
+  note: string;
+  created_at: string | null;
+  groups: ContactGroupSummary[];
+};
+
+export type ContactListResponse = {
+  items: Contact[];
+};
+
+export type ContactMemberSummary = {
+  id: number;
+  name: string;
+  email: string;
+};
+
+export type ContactGroup = {
+  id: number;
+  group_name: string;
+  created_at: string | null;
+  members: ContactMemberSummary[];
+};
+
+export type ContactGroupListResponse = {
+  items: ContactGroup[];
+};
+
+export type EmailLog = {
+  id: number;
+  recipient_email: string;
+  status: string;
+  error_msg: string | null;
+  sent_at: string | null;
+};
+
+export type EmailLogListResponse = {
+  items: EmailLog[];
+};
+
+export type MeetingEmailSendRequest = {
+  recipient_emails: string[];
+  subject: string;
+  attach_minutes_document?: boolean;
+  document_format?: string;
+  attach_html_summary?: boolean;
+};
+
+export type MeetingEmailSendResult = {
+  email: string;
+  success: boolean;
+  error: string | null;
+};
+
+export type MeetingEmailSendResponse = {
+  success_count: number;
+  failure_count: number;
+  items: MeetingEmailSendResult[];
+  warnings: string[];
+};
+
 export type AuthTokenResponse = {
   access_token: string;
   refresh_token: string;
@@ -38,6 +107,22 @@ export type CurrentUser = {
   display_name: string;
   created_at: string | null;
   last_login_at: string | null;
+  smtp_configured: boolean;
+};
+
+export type UserSmtpSettings = {
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_from: string;
+  smtp_password_configured: boolean;
+  using_global_fallback: boolean;
+};
+
+export type SmtpTestResponse = {
+  success: boolean;
+  recipient_email: string;
+  error: string | null;
 };
 
 export type TodoItem = {

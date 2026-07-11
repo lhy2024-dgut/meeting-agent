@@ -7,7 +7,7 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload
 
 from db.engine import get_engine, get_session_factory
-from db.models import Meeting, Transcription, User
+from db.models import Contact, ContactGroup, EmailLog, Meeting, Transcription, User
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,6 +108,43 @@ class MeetingRepository:
             user = session.query(User).filter_by(id=user_id).first()
             if user:
                 user.last_login_at = datetime.now()
+
+    def update_user_profile(self, user_id, *, display_name):
+        with self._write_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return None
+            user.display_name = (display_name or "").strip() or user.username
+            session.flush()
+            return user
+
+    def update_user_password(self, user_id, *, password_hash):
+        with self._write_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return False
+            user.password_hash = password_hash
+            session.flush()
+            return True
+
+    def update_user_smtp_settings(
+        self,
+        user_id,
+        *,
+        smtp_host,
+        smtp_port,
+        smtp_password=None,
+    ):
+        with self._write_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return None
+            user.smtp_host = (smtp_host or "").strip() or None
+            user.smtp_port = int(smtp_port) if smtp_port else None
+            if smtp_password is not None:
+                user.smtp_password = smtp_password.strip() or None
+            session.flush()
+            return user
 
     def list_meeting_ids_for_user(self, user_id):
         with self._read_session() as session:
@@ -470,3 +507,240 @@ class MeetingRepository:
             )
             query = self._apply_user_filter(query, user_id)
             return query.first()
+
+    # Contact management
+
+    def list_contacts(self, user_id: int):
+        with self._read_session() as session:
+            return (
+                session.query(Contact)
+                .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
+                .filter(Contact.user_id == user_id)
+                .order_by(Contact.name.asc(), Contact.id.asc())
+                .all()
+            )
+
+    def get_contact(self, contact_id: int, user_id: int):
+        with self._read_session() as session:
+            return (
+                session.query(Contact)
+                .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
+                .filter(Contact.id == contact_id, Contact.user_id == user_id)
+                .first()
+            )
+
+    def create_contact(
+        self,
+        user_id: int,
+        name: str,
+        email: str,
+        note: str = "",
+        group_ids: list[int] | None = None,
+    ):
+        with self._write_session() as session:
+            contact = Contact(
+                user_id=user_id,
+                name=name,
+                email=email,
+                note=note,
+                created_at=datetime.now(),
+            )
+            session.add(contact)
+            session.flush()
+            if group_ids:
+                groups = (
+                    session.query(ContactGroup)
+                    .filter(
+                        ContactGroup.user_id == user_id,
+                        ContactGroup.id.in_(group_ids),
+                    )
+                    .all()
+                )
+                contact.groups = groups
+            session.flush()
+            return (
+                session.query(Contact)
+                .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
+                .filter(Contact.id == contact.id, Contact.user_id == user_id)
+                .first()
+            )
+
+    def update_contact(
+        self,
+        user_id: int,
+        contact_id: int,
+        *,
+        name: str,
+        email: str,
+        note: str = "",
+        group_ids: list[int] | None = None,
+    ):
+        with self._write_session() as session:
+            contact = (
+                session.query(Contact)
+                .options(joinedload(Contact.groups))
+                .filter(Contact.id == contact_id, Contact.user_id == user_id)
+                .first()
+            )
+            if not contact:
+                return None
+
+            contact.name = name
+            contact.email = email
+            contact.note = note
+            groups = []
+            if group_ids:
+                groups = (
+                    session.query(ContactGroup)
+                    .filter(
+                        ContactGroup.user_id == user_id,
+                        ContactGroup.id.in_(group_ids),
+                    )
+                    .all()
+                )
+            contact.groups = groups
+            session.flush()
+            return (
+                session.query(Contact)
+                .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
+                .filter(Contact.id == contact.id, Contact.user_id == user_id)
+                .first()
+            )
+
+    def delete_contact(self, user_id: int, contact_id: int) -> bool:
+        with self._write_session() as session:
+            contact = (
+                session.query(Contact)
+                .filter(Contact.id == contact_id, Contact.user_id == user_id)
+                .first()
+            )
+            if not contact:
+                return False
+            session.delete(contact)
+            return True
+
+    def list_contact_groups(self, user_id: int):
+        with self._read_session() as session:
+            return (
+                session.query(ContactGroup)
+                .options(joinedload(ContactGroup.contacts))
+                .filter(ContactGroup.user_id == user_id)
+                .order_by(ContactGroup.group_name.asc(), ContactGroup.id.asc())
+                .all()
+            )
+
+    def get_contact_group(self, group_id: int, user_id: int):
+        with self._read_session() as session:
+            return (
+                session.query(ContactGroup)
+                .options(joinedload(ContactGroup.contacts))
+                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
+                .first()
+            )
+
+    def create_contact_group(
+        self,
+        user_id: int,
+        group_name: str,
+        member_ids: list[int] | None = None,
+    ):
+        with self._write_session() as session:
+            group = ContactGroup(
+                user_id=user_id,
+                group_name=group_name,
+                created_at=datetime.now(),
+            )
+            session.add(group)
+            session.flush()
+            if member_ids:
+                members = (
+                    session.query(Contact)
+                    .filter(Contact.user_id == user_id, Contact.id.in_(member_ids))
+                    .all()
+                )
+                group.contacts = members
+            session.refresh(group)
+            return group
+
+    def update_contact_group(
+        self,
+        user_id: int,
+        group_id: int,
+        *,
+        group_name: str,
+        member_ids: list[int] | None = None,
+    ):
+        with self._write_session() as session:
+            group = (
+                session.query(ContactGroup)
+                .options(joinedload(ContactGroup.contacts))
+                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
+                .first()
+            )
+            if not group:
+                return None
+
+            group.group_name = group_name
+            members = []
+            if member_ids:
+                members = (
+                    session.query(Contact)
+                    .filter(Contact.user_id == user_id, Contact.id.in_(member_ids))
+                    .all()
+                )
+            group.contacts = members
+            session.flush()
+            session.refresh(group)
+            return group
+
+    def delete_contact_group(self, user_id: int, group_id: int) -> bool:
+        with self._write_session() as session:
+            group = (
+                session.query(ContactGroup)
+                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
+                .first()
+            )
+            if not group:
+                return False
+            session.delete(group)
+            return True
+
+    # Email logs
+
+    def add_email_log(
+        self,
+        meeting_id: int,
+        recipient_email: str,
+        status: str,
+        error_msg: str | None = None,
+        *,
+        user_id: int | None = None,
+    ):
+        with self._write_session() as session:
+            meeting_query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
+            if user_id is not None:
+                meeting_query = meeting_query.filter(Meeting.user_id == user_id)
+            if not meeting_query.first():
+                return None
+
+            log = EmailLog(
+                meeting_id=meeting_id,
+                recipient_email=recipient_email,
+                status=status,
+                error_msg=error_msg,
+                sent_at=datetime.now(),
+            )
+            session.add(log)
+            session.flush()
+            return log
+
+    def get_email_logs(self, meeting_id: int, *, user_id: int | None = None):
+        with self._read_session() as session:
+            query = (
+                session.query(EmailLog)
+                .join(Meeting, Meeting.id == EmailLog.meeting_id)
+                .filter(EmailLog.meeting_id == meeting_id)
+            )
+            if user_id is not None:
+                query = query.filter(Meeting.user_id == user_id)
+            return query.order_by(EmailLog.sent_at.desc(), EmailLog.id.desc()).all()

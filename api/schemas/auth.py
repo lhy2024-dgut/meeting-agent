@@ -36,3 +36,38 @@ class CurrentUserResponse(BaseModel):
     display_name: str
     created_at: datetime | None = None
     last_login_at: datetime | None = None
+    smtp_configured: bool = False
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserSmtpSettingsResponse(BaseModel):
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_from: str
+    smtp_password_configured: bool
+    using_global_fallback: bool = False
+
+
+class UpdateUserSmtpSettingsRequest(BaseModel):
+    smtp_host: str
+    smtp_port: int
+    smtp_password: str = ""
+
+
+class TestSmtpSettingsRequest(BaseModel):
+    recipient_email: str = ""
+
+
+class SmtpTestResponse(BaseModel):
+    success: bool
+    recipient_email: str
+    error: str | None = None

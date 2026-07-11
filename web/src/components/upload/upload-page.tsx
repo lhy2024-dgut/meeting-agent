@@ -49,9 +49,6 @@ export function UploadPage({ metadata }: UploadPageProps) {
   const [meetingTime, setMeetingTime] = useState(`${`${now.getHours()}`.padStart(2, "0")}:${`${now.getMinutes()}`.padStart(2, "0")}`);
   const [outputFormat, setOutputFormat] = useState(metadata.output_formats[0] ?? "docx");
   const [scene, setScene] = useState(metadata.scenes[0]?.scene ?? "");
-  const [asrModel, setAsrModel] = useState(metadata.asr_models[0] ?? "faster-whisper");
-  const [chunkStrategy, setChunkStrategy] = useState(metadata.chunk_strategies[0]?.value ?? "fixed_512");
-  const [transcriptionMode, setTranscriptionMode] = useState(metadata.transcription_modes[0]?.value ?? "auto");
   const [terms, setTerms] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -94,9 +91,6 @@ export function UploadPage({ metadata }: UploadPageProps) {
       formData.append("meeting_time", meetingTime);
       formData.append("output_format", effectiveOutputFormat);
       formData.append("scene", scene);
-      formData.append("asr_model", asrModel);
-      formData.append("chunk_strategy", chunkStrategy);
-      formData.append("transcription_mode", transcriptionMode);
       if (terms.trim()) formData.append("terms", terms.trim());
       if (templateName) formData.append("template_name", templateName);
 
@@ -151,10 +145,8 @@ export function UploadPage({ metadata }: UploadPageProps) {
 
           <TemplatePicker apiBaseUrl={apiBaseUrl} outputFormat={effectiveOutputFormat} selectedTemplateName={templateName} templates={metadata.templates} onChange={handleTemplateChange} />
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <select className="input-shell" value={asrModel} onChange={(event) => setAsrModel(event.target.value)}>{metadata.asr_models.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-            <select className="input-shell" value={chunkStrategy} onChange={(event) => setChunkStrategy(event.target.value)}>{metadata.chunk_strategies.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-            <select className="input-shell" value={transcriptionMode} onChange={(event) => setTranscriptionMode(event.target.value)}>{metadata.transcription_modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+          <div className="info-strip text-[13px] text-[var(--text-secondary)]">
+            默认使用 SenseVoiceSmall 转写、512 字 RAG 切分和自动转写策略。
           </div>
 
           <textarea className="input-shell min-h-[120px]" value={terms} onChange={(event) => setTerms(event.target.value)} placeholder={"术语词表（每行一个，可选）"} />

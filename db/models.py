@@ -7,7 +7,9 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -24,9 +26,14 @@ class User(Base):
     display_name = Column(String(255))
     created_at = Column(DateTime)
     last_login_at = Column(DateTime)
+    smtp_host = Column(String(255))
+    smtp_port = Column(Integer)
+    smtp_password = Column(String(255))
 
     meetings = relationship("Meeting", back_populates="user", lazy="selectin")
     todos = relationship("TodoItem", back_populates="user", lazy="selectin")
+    contacts = relationship("Contact", back_populates="user", lazy="selectin")
+    contact_groups = relationship("ContactGroup", back_populates="user", lazy="selectin")
 
 
 class Meeting(Base):
@@ -66,6 +73,12 @@ class Meeting(Base):
         lazy="selectin",
         cascade="all, delete-orphan",
     )
+    email_logs = relationship(
+        "EmailLog",
+        back_populates="meeting",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
 
 class Transcription(Base):
@@ -98,6 +111,89 @@ class MeetingChunk(Base):
     content_hash = Column(String(64), nullable=False, default="")
     embedding = Column(Vector(1024))
     created_at = Column(DateTime)
+
+
+contact_group_members = Table(
+    "contact_group_members",
+    Base.metadata,
+    Column("contact_id", Integer, ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "group_id",
+        Integer,
+        ForeignKey("contact_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "email", name="uq_contacts_user_email"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    name = Column(String(100), nullable=False)
+    email = Column(String(255), nullable=False)
+    note = Column(Text)
+    created_at = Column(DateTime)
+
+    user = relationship("User", back_populates="contacts", lazy="joined")
+    groups = relationship(
+        "ContactGroup",
+        secondary=contact_group_members,
+        back_populates="contacts",
+        lazy="selectin",
+    )
+
+
+class ContactGroup(Base):
+    __tablename__ = "contact_groups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "group_name", name="uq_contact_groups_user_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    group_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime)
+
+    user = relationship("User", back_populates="contact_groups", lazy="joined")
+    contacts = relationship(
+        "Contact",
+        secondary=contact_group_members,
+        back_populates="groups",
+        lazy="selectin",
+    )
+
+
+class EmailLog(Base):
+    __tablename__ = "email_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(
+        Integer,
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    recipient_email = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    error_msg = Column(Text)
+    sent_at = Column(DateTime)
+
+    meeting = relationship("Meeting", back_populates="email_logs", lazy="joined")
 
 
 class TodoItem(Base):

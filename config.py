@@ -74,3 +74,15 @@ RECALL_MULTIPLIER = int(os.getenv("RECALL_MULTIPLIER", "4"))
 # Labels
 DURATION_LABELS = {"short": "短会", "medium": "中等", "long": "长会"}
 ENV_LABELS = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}
+FUNASR_MODEL_DIR = Path(
+    os.getenv(
+        "FUNASR_MODEL_DIR",
+        str(Path.home() / ".cache" / "modelscope" / "hub" / "models"),
+    )
+)
+
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "")

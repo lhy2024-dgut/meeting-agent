@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { MeetingActions } from "@/components/meeting/meeting-actions";
 import { MeetingChat } from "@/components/meeting/meeting-chat";
+import { MeetingEmailPanel } from "@/components/meeting/meeting-email-panel";
 import { HtmlSummaryPanel } from "@/components/meeting/html-summary-panel";
 import { MeetingRegeneratePanel } from "@/components/meeting/meeting-regenerate-panel";
 import { TodoWorkspace } from "@/components/todos/todo-workspace";
@@ -130,6 +131,12 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
       <div ref={transcriptRef}><Card className={highlightTranscript ? "source-highlight source-highlight-transcript" : ""}><details open={highlightTranscript}><summary className="expander-summary">{"查看原始转录文本"}</summary><div className="mt-4"><TranscriptList segments={transcript.segments} highlighted={highlightTranscript} /></div></details></Card></div>
 
       <HtmlSummaryPanel meetingId={meeting.id} />
+
+      <MeetingEmailPanel
+        meetingId={meeting.id}
+        meetingTitle={meeting.title}
+        dateText={meeting.date_text}
+      />
 
       <Card><MeetingChat meetingId={meeting.id} /></Card>
     </div>

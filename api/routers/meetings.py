@@ -32,7 +32,7 @@ from db.repository import MeetingRepository
 from prompts.templates import PromptTemplateLoader
 from rag.retriever import get_retriever
 from services.file_service import FileService
-from services.meeting_service import MeetingService
+from services.meeting_service import ASR_MODEL_SENSEVOICE, MeetingService
 from services.terms_service import load_terms, save_terms, truncate_terms
 from services.todo_service import TodoService, parse_action_items_text
 
@@ -476,7 +476,7 @@ async def process_meeting(
     meeting_time: str = Form(...),
     output_format: str = Form("docx"),
     scene: str = Form(PromptTemplateLoader.DEFAULT_SCENE),
-    asr_model: str = Form("faster-whisper"),
+    asr_model: str = Form(ASR_MODEL_SENSEVOICE),
     chunk_strategy: str = Form(config.CHUNK_STRATEGY_FIXED),
     transcription_mode: str = Form("auto"),
     terms: str | None = Form(None),

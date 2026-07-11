@@ -14,6 +14,7 @@ The active mainline is `FastAPI + Next.js`.
 - `rag/`: embeddings, retrieval, reranking, chunking
 - `engines/`: ASR, audio, PDF and LLM-related engines
 - `storage/`: local runtime storage for uploaded files, templates and outputs
+- `funasr/`, `examples/`, `runtime/`: vendored FunASR source and runtime examples for local debugging and modification
 
 ## Tech Stack
 

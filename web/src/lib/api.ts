@@ -2,11 +2,18 @@ import {
   AuthTokenResponse,
   ChatMessageResponse,
   ChatSessionCreateResponse,
+  Contact,
+  ContactGroup,
+  ContactGroupListResponse,
+  ContactListResponse,
   CurrentUser,
   CreateJobResponse,
+  EmailLogListResponse,
   HtmlSummaryGenerateRequest,
   HtmlSummaryResponse,
   JobStatusResponse,
+  MeetingEmailSendRequest,
+  MeetingEmailSendResponse,
   MeetingDetail,
   MeetingListResponse,
   MeetingMutationResponse,
@@ -14,12 +21,14 @@ import {
   RealtimeSessionCreateRequest,
   RealtimeSessionMutationResponse,
   RealtimeSessionResponse,
+  SmtpTestResponse,
   StatsOverviewResponse,
   TodoItem,
   TodoListResponse,
   TodoStatusLogsResponse,
   TranscriptResponse,
   UploadMetadataResponse,
+  UserSmtpSettings,
 } from "@/types/api";
 import {
   clearAuthTokens,
@@ -365,6 +374,80 @@ export function getCurrentUser(options?: ApiRequestOptions): Promise<CurrentUser
   return requestJson<CurrentUser>("/auth/me", {}, options);
 }
 
+export function updateCurrentUserProfile(
+  payload: { display_name: string },
+  options?: ApiRequestOptions,
+): Promise<CurrentUser> {
+  return requestJson<CurrentUser>(
+    "/auth/profile",
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function changeCurrentUserPassword(
+  payload: { current_password: string; new_password: string },
+  options?: ApiRequestOptions,
+): Promise<MeetingMutationResponse> {
+  return requestJson<MeetingMutationResponse>(
+    "/auth/password",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function getCurrentUserSmtpSettings(
+  options?: ApiRequestOptions,
+): Promise<UserSmtpSettings> {
+  return requestJson<UserSmtpSettings>("/auth/smtp", {}, options);
+}
+
+export function updateCurrentUserSmtpSettings(
+  payload: { smtp_host: string; smtp_port: number; smtp_password?: string },
+  options?: ApiRequestOptions,
+): Promise<UserSmtpSettings> {
+  return requestJson<UserSmtpSettings>(
+    "/auth/smtp",
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function testCurrentUserSmtpSettings(
+  payload: { recipient_email?: string } = {},
+  options?: ApiRequestOptions,
+): Promise<SmtpTestResponse> {
+  return requestJson<SmtpTestResponse>(
+    "/auth/smtp/test",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
 export function logoutUser(options?: ApiRequestOptions): Promise<MeetingMutationResponse> {
   return requestJson<MeetingMutationResponse>(
     "/auth/logout",
@@ -542,6 +625,154 @@ export function getTodoLogs(
   options?: ApiRequestOptions,
 ): Promise<TodoStatusLogsResponse> {
   return requestJson<TodoStatusLogsResponse>(`/todos/${todoId}/logs`, {}, options);
+}
+
+export function getContacts(options?: ApiRequestOptions): Promise<ContactListResponse> {
+  return requestJson<ContactListResponse>("/contacts", {}, options);
+}
+
+export function createContact(
+  payload: {
+    name: string;
+    email: string;
+    note?: string;
+    group_ids?: number[];
+  },
+  options?: ApiRequestOptions,
+): Promise<Contact> {
+  return requestJson<Contact>(
+    "/contacts",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function updateContact(
+  contactId: number,
+  payload: {
+    name: string;
+    email: string;
+    note?: string;
+    group_ids?: number[];
+  },
+  options?: ApiRequestOptions,
+): Promise<Contact> {
+  return requestJson<Contact>(
+    `/contacts/${contactId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function deleteContact(
+  contactId: number,
+  options?: ApiRequestOptions,
+): Promise<MeetingMutationResponse> {
+  return requestJson<MeetingMutationResponse>(
+    `/contacts/${contactId}`,
+    {
+      method: "DELETE",
+    },
+    options,
+  );
+}
+
+export function getContactGroups(options?: ApiRequestOptions): Promise<ContactGroupListResponse> {
+  return requestJson<ContactGroupListResponse>("/contact-groups", {}, options);
+}
+
+export function createContactGroup(
+  payload: {
+    group_name: string;
+    member_ids?: number[];
+  },
+  options?: ApiRequestOptions,
+): Promise<ContactGroup> {
+  return requestJson<ContactGroup>(
+    "/contact-groups",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function updateContactGroup(
+  groupId: number,
+  payload: {
+    group_name: string;
+    member_ids?: number[];
+  },
+  options?: ApiRequestOptions,
+): Promise<ContactGroup> {
+  return requestJson<ContactGroup>(
+    `/contact-groups/${groupId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function deleteContactGroup(
+  groupId: number,
+  options?: ApiRequestOptions,
+): Promise<MeetingMutationResponse> {
+  return requestJson<MeetingMutationResponse>(
+    `/contact-groups/${groupId}`,
+    {
+      method: "DELETE",
+    },
+    options,
+  );
+}
+
+export function getMeetingEmailLogs(
+  meetingId: number,
+  options?: ApiRequestOptions,
+): Promise<EmailLogListResponse> {
+  return requestJson<EmailLogListResponse>(`/meetings/${meetingId}/email-logs`, {}, options);
+}
+
+export function sendMeetingEmail(
+  meetingId: number,
+  payload: MeetingEmailSendRequest,
+  options?: ApiRequestOptions,
+): Promise<MeetingEmailSendResponse> {
+  return requestJson<MeetingEmailSendResponse>(
+    `/meetings/${meetingId}/emails/send`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? 120_000,
+    },
+  );
 }
 
 export function getUploadMetadata(

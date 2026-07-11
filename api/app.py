@@ -5,7 +5,7 @@ from api.bootstrap import ensure_project_root
 
 ensure_project_root()
 
-from api.routers import auth, chat, exports, health, jobs, meetings, metadata, realtime, stats, todos
+from api.routers import auth, chat, contacts, exports, health, jobs, meetings, metadata, realtime, stats, todos
 
 
 def create_app() -> FastAPI:
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     app.include_router(realtime.router)
     app.include_router(stats.router)
     app.include_router(todos.router)
+    app.include_router(contacts.router)
     return app
 
 
