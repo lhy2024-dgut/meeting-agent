@@ -40,8 +40,9 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
-const CHAT_REQUEST_TIMEOUT_MS = 90_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const CHAT_REQUEST_TIMEOUT_MS = 300_000;
+const LLM_REQUEST_TIMEOUT_MS = 300_000;
 const AUTH_IGNORED_PATHS = new Set([
   "/auth/login",
   "/auth/register",
@@ -791,7 +792,10 @@ export function createMeetingProcessJob(
       method: "POST",
       body: formData,
     },
-    options,
+    {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? 120_000,
+    },
   );
 }
 
@@ -823,7 +827,10 @@ export function generateHtmlSummary(
       },
       body: JSON.stringify(payload),
     },
-    options,
+    {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS,
+    },
   );
 }
 
@@ -905,7 +912,8 @@ export function uploadRealtimeChunk(
     },
     {
       ...options,
-      timeoutMs: options?.timeoutMs ?? 30_000,
+      // 首个分片可能触发模型加载、个别分片推理偏慢，放宽超时避免前端 abort 造成分片丢失
+      timeoutMs: options?.timeoutMs ?? 90_000,
     },
   );
 }
@@ -919,7 +927,11 @@ export function stopRealtimeSession(
     {
       method: "POST",
     },
-    options,
+    {
+      ...options,
+      // 结束录音需刷尾音 + 加载标点模型 + 全文补标点 + 拼接音频，放宽超时
+      timeoutMs: options?.timeoutMs ?? 120_000,
+    },
   );
 }
 

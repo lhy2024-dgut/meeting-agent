@@ -328,137 +328,112 @@ function TodoRow({
   }
 
   return (
-    <Card className={`todo-item todo-card todo-card-${todo.status}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 gap-3">
-          <button
-            type="button"
-            className={`todo-check todo-check-${todo.status}`}
-            onClick={() =>
-              void onStatusChange(todo.status === "done" ? "pending" : "done")
-            }
-            aria-label="toggle todo status"
-          >
-            {todo.status === "done" ? "✓" : ""}
-          </button>
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`todo-status-badge todo-status-${todo.status}`}>
-                {TODO_STATUS_LABELS[todo.status]}
-              </span>
-              <span className={`todo-priority-badge todo-priority-${todo.priority}`}>
-                {TODO_PRIORITY_LABELS[todo.priority]}
-              </span>
-              {!compact && meetingTitle ? (
-                <span className="todo-meeting-badge">{meetingTitle}</span>
-              ) : null}
-            </div>
+    <Card className={`todo-card todo-card-${todo.status}`}>
+      <div className="space-y-3">
+        {/* 顶部行：左侧两个标签竖排成一列，右侧按钮横向排开 */}
+        <div className="flex w-full flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <span className={`todo-status-badge todo-status-${todo.status} w-fit`}>
+              {TODO_STATUS_LABELS[todo.status]}
+            </span>
+            <span className={`todo-priority-badge todo-priority-${todo.priority} w-fit`}>
+              {TODO_PRIORITY_LABELS[todo.priority]}
+            </span>
+            {!compact && meetingTitle ? (
+              <span className="todo-meeting-badge w-fit">{meetingTitle}</span>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
             {editing ? (
-              <div className="space-y-3">
-                <textarea
-                  className="input-shell min-h-[88px]"
-                  value={content}
-                  onChange={(event) => setContent(event.target.value)}
-                />
-                <div className="grid gap-3 md:grid-cols-3">
-                  <input
-                    className="input-shell"
-                    value={assignee}
-                    onChange={(event) => setAssignee(event.target.value)}
-                    placeholder="负责人"
-                  />
-                  <input
-                    className="input-shell"
-                    type="date"
-                    value={dueDate}
-                    onChange={(event) => setDueDate(event.target.value)}
-                  />
-                  <select
-                    className="input-shell"
-                    value={priority}
-                    onChange={(event) =>
-                      setPriority(event.target.value as TodoItem["priority"])
-                    }
-                  >
-                    <option value="high">高优先级</option>
-                    <option value="medium">中优先级</option>
-                    <option value="low">低优先级</option>
-                  </select>
-                </div>
-              </div>
+              <>
+                <button className="secondary-button" type="button" onClick={() => setEditing(false)}>
+                  取消
+                </button>
+                <button className="primary-button" type="button" onClick={() => void saveEdits()}>
+                  保存
+                </button>
+              </>
             ) : (
               <>
-                <div
-                  className={`todo-main-text ${
-                    todo.status === "done" ? "todo-main-text-done" : ""
-                  }`}
-                >
-                  {todo.content}
-                </div>
-                <div className="flex flex-wrap gap-4 text-[13px] text-[var(--muted)]">
-                  <span>负责人：{todo.assignee || "未指定"}</span>
-                  <span>截止：{todo.due_date ? todo.due_date.slice(0, 10) : "未指定"}</span>
-                </div>
+                <button className="secondary-button" type="button" onClick={() => setEditing(true)}>
+                  编辑
+                </button>
+                {todo.status !== "cancelled" ? (
+                  <button className="tertiary-button" type="button" onClick={() => void onStatusChange("cancelled")}>
+                    取消待办
+                  </button>
+                ) : (
+                  <button className="tertiary-button" type="button" onClick={() => void onStatusChange("pending")}>
+                    恢复待办
+                  </button>
+                )}
+                <button className="secondary-button" type="button" onClick={() => void toggleLogs()}>
+                  {logsOpen ? "收起日志" : "查看日志"}
+                </button>
               </>
             )}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {editing ? (
-            <>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setEditing(false)}
+        {editing ? (
+          <>
+            {/* 待办内容输入框：独占一行，占满整个待办框宽度 */}
+            <textarea
+              className="input-shell w-full min-h-[120px]"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="待办内容"
+            />
+            {/* 负责人 / 日期 / 优先级：占满宽度的一行 */}
+            <div className="grid w-full gap-3 sm:grid-cols-3">
+              <input
+                className="input-shell"
+                value={assignee}
+                onChange={(event) => setAssignee(event.target.value)}
+                placeholder="负责人"
+              />
+              <input
+                className="input-shell"
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+              />
+              <select
+                className="input-shell"
+                value={priority}
+                onChange={(event) => setPriority(event.target.value as TodoItem["priority"])}
               >
-                取消
-              </button>
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => void saveEdits()}
-              >
-                保存
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setEditing(true)}
-              >
-                编辑
-              </button>
-              {todo.status !== "cancelled" ? (
-                <button
-                  className="tertiary-button"
-                  type="button"
-                  onClick={() => void onStatusChange("cancelled")}
-                >
-                  取消待办
-                </button>
-              ) : (
-                <button
-                  className="tertiary-button"
-                  type="button"
-                  onClick={() => void onStatusChange("pending")}
-                >
-                  恢复待办
-                </button>
-              )}
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => void toggleLogs()}
-              >
-                {logsOpen ? "收起日志" : "查看日志"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+                <option value="high">高优先级</option>
+                <option value="medium">中优先级</option>
+                <option value="low">低优先级</option>
+              </select>
+            </div>
+            {/* 完成状态切换 */}
+            <label className="flex w-fit cursor-pointer items-center gap-2 text-[14px] text-[var(--text)]">
+              <input
+                type="checkbox"
+                checked={todo.status === "done"}
+                onChange={() => void onStatusChange(todo.status === "done" ? "pending" : "done")}
+              />
+              标记为已完成
+            </label>
+          </>
+        ) : (
+          <>
+            {/* 待办内容：独占一行，占满整个待办框宽度 */}
+            <div
+              className={`todo-main-text w-full break-words ${
+                todo.status === "done" ? "todo-main-text-done" : ""
+              }`}
+            >
+              {todo.content}
+            </div>
+            <div className="flex flex-wrap gap-4 text-[13px] text-[var(--muted)]">
+              <span>负责人：{todo.assignee || "未指定"}</span>
+              <span>截止：{todo.due_date ? todo.due_date.slice(0, 10) : "未指定"}</span>
+            </div>
+          </>
+        )}
 
       {logsOpen ? (
         <div className="todo-log-panel">
@@ -488,6 +463,7 @@ function TodoRow({
           )}
         </div>
       ) : null}
+      </div>
     </Card>
   );
 }

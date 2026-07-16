@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from api.deps import get_current_user
 from api.schemas.jobs import CreateJobResponse
@@ -63,7 +64,15 @@ async def append_realtime_chunk(
     try:
         suffix = Path(file.filename).suffix.lower() or ".webm"
         payload = await file.read()
-        session = realtime_session_manager.append_chunk(session_id, payload, suffix, chunk_index)
+        # 分片转写含 ffmpeg + FunASR 推理（阻塞、耗时），放进线程池执行，
+        # 避免阻塞事件循环导致其它请求（如待办更新）全部超时。
+        session = await run_in_threadpool(
+            realtime_session_manager.append_chunk,
+            session_id,
+            payload,
+            suffix,
+            chunk_index,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Realtime session not found") from exc
     except Exception as exc:

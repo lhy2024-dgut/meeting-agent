@@ -1,11 +1,11 @@
 from pathlib import Path
 
 import config
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from api.schemas.jobs import SceneOption, TemplateOption, UploadMetadataResponse
-from chains.export_chain import list_templates
+from chains.export_chain import TEMPLATE_SOURCE_DIR, list_templates
 from prompts.templates import PromptTemplateLoader
 from services.meeting_service import ASR_MODEL_SENSEVOICE, ASR_MODEL_WHISPER
 
@@ -51,6 +51,24 @@ def get_upload_metadata() -> UploadMetadataResponse:
             {"value": "parallel", "label": "并行转写"},
         ],
     )
+
+
+@router.post("/templates/upload")
+async def upload_template(file: UploadFile = File(...)) -> dict:
+    """上传自定义导出模板（.docx 或 .pdf）"""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".docx", ".pdf"}:
+        raise HTTPException(status_code=400, detail="仅支持 .docx 或 .pdf 模板文件")
+
+    TEMPLATE_SOURCE_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "template").stem
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in safe_name)
+    dest = TEMPLATE_SOURCE_DIR / f"{safe_name}{suffix}"
+
+    content = await file.read()
+    dest.write_bytes(content)
+
+    return {"name": safe_name, "suffix": suffix, "size": len(content)}
 
 
 @router.get("/templates/{template_name}/preview")

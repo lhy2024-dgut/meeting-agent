@@ -52,7 +52,8 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   const [meetingTime, setMeetingTime] = useState(toIsoTime(now));
   const [outputFormat, setOutputFormat] = useState(metadata.output_formats[0] ?? "docx");
   const [scene, setScene] = useState(metadata.scenes[0]?.scene ?? "");
-  const [asrModel, setAsrModel] = useState(metadata.asr_models[0] ?? "faster-whisper");
+  // 实时转写固定使用 FunASR paraformer-zh-streaming 流式模型，无需选择
+  const asrModel = "funasr-streaming";
   const [terms, setTerms] = useState("");
   const [session, setSession] = useState<RealtimeSessionResponse | null>(null);
   const [error, setError] = useState("");
@@ -68,6 +69,14 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   const chunkIndexRef = useRef(0);
   const startedAtRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const isRecordingRef = useRef(false);
+  const cycleTimerRef = useRef<number | null>(null);
+  const preferredMimeTypeRef = useRef<string | undefined>(undefined);
+
+  // 每个分片的录制时长（毫秒）。使用「循环录制」而非 timeslice，
+  // 确保每个上传的分片都是含 WebM 头、可独立解码的完整文件。
+  // 用较长的分片（8s）减少分片边界处的编码断点/缺失前瞻，提升流式转写准确率。
+  const CHUNK_DURATION_MS = 8000;
 
   const { job, startPolling, resetJob } = useJobPolling({
     onSucceeded: (nextJob) => {
@@ -87,8 +96,21 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
     sessionIdRef.current = session?.session_id ?? null;
   }, [session]);
 
+  // 用 ref 持有最新的 job，供卸载清理时读取新鲜值（避免闭包读到旧 job）
+  const jobRef = useRef(job);
+  useEffect(() => {
+    jobRef.current = job;
+  }, [job]);
+
+  // 仅在组件真正卸载时清理会话（依赖 [apiBaseUrl]，不随 job 变化重跑，
+  // 否则点击「生成会议纪要」使 job 变化时会误触发 DELETE 删掉 recording.wav）。
   useEffect(() => {
     return () => {
+      isRecordingRef.current = false;
+      if (cycleTimerRef.current !== null) {
+        window.clearTimeout(cycleTimerRef.current);
+        cycleTimerRef.current = null;
+      }
       try {
         if (recorderRef.current && recorderRef.current.state !== "inactive") {
           recorderRef.current.stop();
@@ -99,7 +121,9 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       const sessionId = sessionIdRef.current;
       if (!sessionId) return;
-      if (job && job.status !== "failed" && job.status !== "succeeded") return;
+      // 生成任务进行中/已成功时不删除：进行中会杀掉后台任务，已成功则后端已自行清理
+      const currentJob = jobRef.current;
+      if (currentJob && currentJob.status !== "failed") return;
       const accessToken = getAccessTokenClient();
       void fetch(`${apiBaseUrl}/realtime/sessions/${sessionId}`, {
         method: "DELETE",
@@ -111,7 +135,7 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
         keepalive: true,
       }).catch(() => undefined);
     };
-  }, [apiBaseUrl, job]);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     if (!isRecording) {
@@ -126,6 +150,56 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
     }, 500);
     return () => window.clearInterval(timer);
   }, [isRecording, session?.duration_seconds]);
+
+  function queueChunkUpload(blob: Blob) {
+    if (blob.size <= 0 || !sessionIdRef.current) return;
+    const chunkIndex = chunkIndexRef.current;
+    chunkIndexRef.current += 1;
+    setIsUploading(true);
+    uploadChainRef.current = uploadChainRef.current
+      .then(async () => {
+        const formData = new FormData();
+        formData.append("file", blob, `chunk_${chunkIndex}.webm`);
+        formData.append("chunk_index", String(chunkIndex));
+        const nextState = await uploadRealtimeChunk(sessionIdRef.current!, formData);
+        setSession(nextState);
+      })
+      .catch((uploadError) => {
+        setError(uploadError instanceof Error ? uploadError.message : "上传录音分片失败");
+      })
+      .finally(() => {
+        setIsUploading(false);
+      });
+  }
+
+  // 启动一段独立录制：录满 CHUNK_DURATION_MS 后 stop()，
+  // stop 会 flush 出一个含 WebM 头的完整文件；随后若仍在录音则开启下一段。
+  function startRecorderCycle(stream: MediaStream) {
+    const mimeType = preferredMimeTypeRef.current;
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream);
+    const parts: Blob[] = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) parts.push(event.data);
+    };
+    recorder.onstop = () => {
+      if (parts.length > 0) {
+        const blob = new Blob(parts, { type: recorder.mimeType || "audio/webm" });
+        queueChunkUpload(blob);
+      }
+      if (isRecordingRef.current && streamRef.current) {
+        startRecorderCycle(streamRef.current);
+      }
+    };
+
+    recorderRef.current = recorder;
+    recorder.start(); // 不带 timeslice：每段 stop 时产出完整可解码文件
+    cycleTimerRef.current = window.setTimeout(() => {
+      if (recorder.state !== "inactive") recorder.stop();
+    }, CHUNK_DURATION_MS);
+  }
 
   async function handleStartRecording() {
     setError("");
@@ -143,44 +217,26 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
       sessionIdRef.current = nextSession.session_id;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredMimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      preferredMimeTypeRef.current = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : undefined;
-      const recorder = preferredMimeType
-        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
-        : new MediaRecorder(stream);
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size <= 0 || !sessionIdRef.current) return;
-        const chunkIndex = chunkIndexRef.current;
-        chunkIndexRef.current += 1;
-        setIsUploading(true);
-        uploadChainRef.current = uploadChainRef.current
-          .then(async () => {
-            const formData = new FormData();
-            formData.append("file", event.data, `chunk_${chunkIndex}.webm`);
-            formData.append("chunk_index", String(chunkIndex));
-            const nextState = await uploadRealtimeChunk(sessionIdRef.current!, formData);
-            setSession(nextState);
-          })
-          .catch((uploadError) => {
-            setError(uploadError instanceof Error ? uploadError.message : "上传录音分片失败");
-          })
-          .finally(() => {
-            setIsUploading(false);
-          });
-      };
-
-      recorderRef.current = recorder;
       streamRef.current = stream;
       chunkIndexRef.current = 0;
+      uploadChainRef.current = Promise.resolve();
       startedAtRef.current = Date.now();
+      isRecordingRef.current = true;
       setSession(nextSession);
       setElapsedSeconds(0);
       setIsRecording(true);
-      recorder.start(3000);
+      startRecorderCycle(stream);
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "启动录音失败");
+      isRecordingRef.current = false;
+      if (cycleTimerRef.current !== null) {
+        window.clearTimeout(cycleTimerRef.current);
+        cycleTimerRef.current = null;
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       recorderRef.current = null;
@@ -194,18 +250,26 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   }
 
   async function handleStopRecording() {
-    const recorder = recorderRef.current;
-    if (!recorder || !sessionIdRef.current) return;
+    if (!sessionIdRef.current) return;
 
     setIsStopping(true);
     setError("");
     try {
-      const stopPromise = new Promise<void>((resolve) => {
-        recorder.addEventListener("stop", () => resolve(), { once: true });
-      });
-      recorder.stop();
+      // 先阻止循环再开启新一段，然后 stop 当前录制以 flush 最后一个分片
+      isRecordingRef.current = false;
+      if (cycleTimerRef.current !== null) {
+        window.clearTimeout(cycleTimerRef.current);
+        cycleTimerRef.current = null;
+      }
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        const stopPromise = new Promise<void>((resolve) => {
+          recorder.addEventListener("stop", () => resolve(), { once: true });
+        });
+        recorder.stop();
+        await stopPromise;
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
-      await stopPromise;
       await uploadChainRef.current;
       const nextSession = await stopRealtimeSession(sessionIdRef.current);
       setSession(nextSession);
@@ -265,10 +329,6 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
     }
   }
 
-  const visibleSegments = session?.speaker_segments.length
-    ? session.speaker_segments
-    : session?.segments ?? [];
-
   return (
     <div className="space-y-6">
       <div>
@@ -286,14 +346,9 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
           </select>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <select className="input-shell" value={scene} onChange={(event) => setScene(event.target.value)} disabled={Boolean(session)}>
-            {metadata.scenes.map((item) => <option key={item.scene} value={item.scene}>{item.display_name}</option>)}
-          </select>
-          <select className="input-shell" value={asrModel} onChange={(event) => setAsrModel(event.target.value)} disabled={Boolean(session)}>
-            {metadata.asr_models.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        </div>
+        <select className="input-shell w-full" value={scene} onChange={(event) => setScene(event.target.value)} disabled={Boolean(session)}>
+          {metadata.scenes.map((item) => <option key={item.scene} value={item.scene}>{item.display_name}</option>)}
+        </select>
 
         <textarea className="input-shell min-h-[120px]" value={terms} onChange={(event) => setTerms(event.target.value)} placeholder="术语词表（每行一个，可选）" disabled={Boolean(session)} />
 
@@ -342,20 +397,27 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
         </div>
 
         <div className="rounded-[18px] border border-[var(--border)] bg-white p-4">
-          {visibleSegments.length > 0 ? (
+          {session?.speaker_segments && session.speaker_segments.length > 0 ? (
+            // 说话人识别后：按说话人分段显示（无时间戳）
             <div className="space-y-3">
-              {visibleSegments.map((segment, index) => (
-                <div key={`${segment.timestamp}-${index}`} className="rounded-[14px] bg-[var(--surface)] px-3 py-2 text-[14px] leading-7 text-[var(--text)]">
-                  <div className="mb-1 text-[12px] font-semibold text-[var(--primary)]">
-                    {formatDuration(segment.start)}
-                    {segment.speaker ? ` · ${segment.speaker}` : ""}
-                  </div>
+              {session.speaker_segments.map((segment, index) => (
+                <div key={index} className="rounded-[14px] bg-[var(--surface)] px-3 py-2 text-[15px] leading-7 text-[var(--text)]">
+                  {segment.speaker ? (
+                    <div className="mb-1 text-[12px] font-semibold text-[var(--primary)]">{segment.speaker}</div>
+                  ) : null}
                   <div>{segment.text}</div>
                 </div>
               ))}
             </div>
+          ) : session?.transcript ? (
+            // 录音中 / 停止后：一条持续增长的连续转写文本（无时间戳、不分段）
+            <div className="whitespace-pre-wrap text-[15px] leading-8 text-[var(--text)]">
+              {session.transcript}
+            </div>
           ) : (
-            <div className="text-[13px] text-[var(--muted)]">{"暂无转写内容。"}</div>
+            <div className="text-[13px] text-[var(--muted)]">
+              {isRecording ? "正在聆听，转写文字将实时显示…" : "暂无转写内容。"}
+            </div>
           )}
         </div>
       </Card>
