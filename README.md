@@ -56,6 +56,8 @@ Configure environment variables in `.env`. The key variables are:
 
 - `DATABASE_URL`
 - `OLLAMA_BASE_URL`
+- `JWT_SECRET_KEY`: required for persistent login sessions; use a long random value.
+- `DEFAULT_ADMIN_PASSWORD`: required only when the legacy default account is used; set a strong unique value.
 - `LLM_MODEL`
 - `WHISPER_MODEL`
 

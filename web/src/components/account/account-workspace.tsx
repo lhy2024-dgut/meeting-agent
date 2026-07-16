@@ -60,10 +60,6 @@ export function AccountWorkspace() {
   const [passwordSuccess, setPasswordSuccess] = useState("");
 
   useEffect(() => {
-    setDisplayName(user?.display_name ?? "");
-  }, [user?.display_name]);
-
-  useEffect(() => {
     let ignore = false;
 
     async function loadSmtpSettings() {
@@ -98,7 +94,8 @@ export function AccountWorkspace() {
   }
 
   async function handleProfileSave() {
-    if (!displayName.trim()) {
+    const nextDisplayName = (displayName || user?.display_name || "").trim();
+    if (!nextDisplayName) {
       setProfileError("显示名称不能为空");
       setProfileSuccess("");
       return;
@@ -108,7 +105,7 @@ export function AccountWorkspace() {
     setProfileError("");
     setProfileSuccess("");
     try {
-      await updateCurrentUserProfile({ display_name: displayName.trim() });
+      await updateCurrentUserProfile({ display_name: nextDisplayName });
       await refreshUser();
       setProfileSuccess("账户信息已保存");
     } catch (error) {
@@ -249,7 +246,7 @@ export function AccountWorkspace() {
               </label>
               <input
                 className="input-shell"
-                value={displayName}
+                value={displayName || user?.display_name || ""}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="输入显示名称"
               />

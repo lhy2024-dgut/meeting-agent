@@ -11,6 +11,9 @@ from db.models import Meeting, TodoItem, TodoStatusLog
 TODO_STATUS_PENDING = "pending"
 TODO_STATUS_DONE = "done"
 TODO_STATUS_CANCELLED = "cancelled"
+TODO_SOURCE_MANUAL = "manual"
+TODO_SOURCE_MEETING_PIPELINE = "meeting_pipeline"
+_UNSET = object()
 TODO_PRIORITIES = {"high", "medium", "low"}
 TODO_STATUSES = {TODO_STATUS_PENDING, TODO_STATUS_DONE, TODO_STATUS_CANCELLED}
 ALLOWED_STATUS_TRANSITIONS = {
@@ -100,6 +103,10 @@ def parse_action_items_text(action_items_text: str | None) -> list[dict[str, obj
             }
         )
     return items
+
+
+def _content_key(content: str) -> str:
+    return " ".join((content or "").split()).casefold()
 
 
 class TodoTransitionError(ValueError):
@@ -198,6 +205,8 @@ class TodoService:
                 due_date=parse_due_date(due_date),
                 status=TODO_STATUS_PENDING,
                 priority=normalize_priority(priority),
+                source=TODO_SOURCE_MANUAL,
+                is_user_modified=True,
                 created_at=now,
                 updated_at=now,
             )
@@ -208,7 +217,7 @@ class TodoService:
                     todo_id=todo.id,
                     from_status=None,
                     to_status=TODO_STATUS_PENDING,
-                    changed_by="manual",
+                    changed_by=f"user:{user_id}",
                     changed_at=now,
                     reason="created",
                 )
@@ -223,8 +232,8 @@ class TodoService:
         todo_id: int,
         *,
         content: str | None = None,
-        assignee: str | None = None,
-        due_date: str | datetime | None = None,
+        assignee: str | None | object = _UNSET,
+        due_date: str | datetime | None | object = _UNSET,
         priority: str | None = None,
     ) -> TodoItem:
         with self._write_session() as session:
@@ -241,12 +250,19 @@ class TodoService:
                 if not normalized_content:
                     raise TodoTransitionError("Todo content is required")
                 todo.content = normalized_content
-            if assignee is not None:
-                todo.assignee = assignee.strip() or None
-            if due_date is not None:
+            if assignee is not _UNSET:
+                todo.assignee = (assignee or "").strip() or None
+            if due_date is not _UNSET:
                 todo.due_date = parse_due_date(due_date)
             if priority is not None:
                 todo.priority = normalize_priority(priority)
+            if (
+                content is not None
+                or assignee is not _UNSET
+                or due_date is not _UNSET
+                or priority is not None
+            ):
+                todo.is_user_modified = True
             todo.updated_at = datetime.now()
             session.flush()
             session.refresh(todo)
@@ -258,7 +274,6 @@ class TodoService:
         todo_id: int,
         *,
         to_status: str,
-        changed_by: str = "manual",
         reason: str | None = None,
     ) -> TodoItem:
         next_status = normalize_status(to_status)
@@ -281,13 +296,14 @@ class TodoService:
 
             now = datetime.now()
             todo.status = next_status
+            todo.is_user_modified = True
             todo.updated_at = now
             session.add(
                 TodoStatusLog(
                     todo_id=todo.id,
                     from_status=current_status,
                     to_status=next_status,
-                    changed_by=changed_by,
+                    changed_by=f"user:{user_id}",
                     changed_at=now,
                     reason=reason,
                 )
@@ -333,29 +349,48 @@ class TodoService:
             if existing and not replace:
                 return existing
 
-            if replace and existing:
-                session.query(TodoStatusLog).filter(
-                    TodoStatusLog.todo_id.in_([item.id for item in existing])
-                ).delete(synchronize_session=False)
-                session.query(TodoItem).filter(
-                    TodoItem.meeting_id == meeting_id,
-                    TodoItem.user_id == user_id,
-                ).delete(synchronize_session=False)
+            protected_items = [
+                item
+                for item in existing
+                if item.source != TODO_SOURCE_MEETING_PIPELINE or item.is_user_modified
+            ]
+            protected_content_keys = {_content_key(item.content) for item in protected_items}
+
+            if replace:
+                replaceable_ids = [
+                    item.id
+                    for item in existing
+                    if item.source == TODO_SOURCE_MEETING_PIPELINE
+                    and not item.is_user_modified
+                ]
+                if replaceable_ids:
+                    session.query(TodoStatusLog).filter(
+                        TodoStatusLog.todo_id.in_(replaceable_ids)
+                    ).delete(synchronize_session=False)
+                    session.query(TodoItem).filter(
+                        TodoItem.id.in_(replaceable_ids)
+                    ).delete(synchronize_session=False)
 
             if not parsed_items:
-                return []
+                session.flush()
+                return protected_items
 
             now = datetime.now()
             created: list[TodoItem] = []
             for item in parsed_items:
+                content = str(item["content"]).strip()
+                if _content_key(content) in protected_content_keys:
+                    continue
                 todo = TodoItem(
                     user_id=user_id,
                     meeting_id=meeting_id,
-                    content=str(item["content"]).strip(),
+                    content=content,
                     assignee=item.get("assignee"),
                     due_date=item.get("due_date"),
                     status=TODO_STATUS_PENDING,
                     priority=normalize_priority(str(item.get("priority", "medium"))),
+                    source=TODO_SOURCE_MEETING_PIPELINE,
+                    is_user_modified=False,
                     created_at=now,
                     updated_at=now,
                 )
@@ -374,4 +409,4 @@ class TodoService:
                 created.append(todo)
 
             session.flush()
-            return created
+            return protected_items + created

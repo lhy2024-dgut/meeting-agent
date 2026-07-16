@@ -17,7 +17,11 @@ export function AuthCard({ mode }: AuthCardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, register } = useAuth();
-  const nextPath = searchParams.get("next") || "/";
+  const requestedNextPath = searchParams.get("next");
+  const nextPath =
+    requestedNextPath?.startsWith("/") && !requestedNextPath.startsWith("//")
+      ? requestedNextPath
+      : "/";
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -51,7 +55,11 @@ export function AuthCard({ mode }: AuthCardProps) {
           display_name: displayName.trim() || username.trim(),
         });
       }
-      router.replace(nextPath);
+      if (typeof window !== "undefined") {
+        window.location.assign(nextPath);
+      } else {
+        router.replace(nextPath);
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "认证失败");
     } finally {

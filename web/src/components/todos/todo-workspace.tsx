@@ -34,7 +34,7 @@ type TodoUpdatePayload = {
 };
 
 const DEFAULT_FILTERS: Filters = {
-  status: "all",
+  status: "pending",
   priority: "all",
 };
 
@@ -81,9 +81,9 @@ export function TodoWorkspace({
     [filters, todos],
   );
 
-  async function handleCreate(payload: TodoCreatePayload) {
+  async function handleCreate(payload: TodoCreatePayload): Promise<boolean> {
     if (!meetingId) {
-      return;
+      return false;
     }
 
     setCreating(true);
@@ -96,8 +96,10 @@ export function TodoWorkspace({
         priority: payload.priority,
       });
       setTodos((current) => [created, ...current]);
+      return true;
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "创建待办失败");
+      return false;
     } finally {
       setCreating(false);
     }
@@ -106,11 +108,11 @@ export function TodoWorkspace({
   async function mutateTodo(
     todoId: number,
     updater: (item: TodoItem) => Promise<TodoItem>,
-  ) {
+  ): Promise<boolean> {
     setError("");
     const target = todos.find((item) => item.id === todoId);
     if (!target) {
-      return;
+      return false;
     }
 
     try {
@@ -118,8 +120,31 @@ export function TodoWorkspace({
       setTodos((current) =>
         current.map((item) => (item.id === todoId ? updated : item)),
       );
+      return true;
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : "更新待办失败");
+      return false;
+    }
+  }
+
+  async function changeTodoStatus(
+    todoId: number,
+    status: TodoItem["status"],
+  ): Promise<boolean> {
+    setError("");
+    try {
+      const updated = await updateTodoStatus(todoId, {
+        status,
+      });
+      setTodos((current) =>
+        status === "done"
+          ? current.filter((item) => item.id !== todoId)
+          : current.map((item) => (item.id === todoId ? updated : item)),
+      );
+      return true;
+    } catch (mutationError) {
+      setError(mutationError instanceof Error ? mutationError.message : "更新待办失败");
+      return false;
     }
   }
 
@@ -193,14 +218,7 @@ export function TodoWorkspace({
               onUpdate={(payload) =>
                 mutateTodo(todo.id, () => updateTodo(todo.id, payload))
               }
-              onStatusChange={(status) =>
-                mutateTodo(todo.id, () =>
-                  updateTodoStatus(todo.id, {
-                    status,
-                    changed_by: "manual",
-                  }),
-                )
-              }
+              onStatusChange={(status) => changeTodoStatus(todo.id, status)}
             />
           ))}
         </div>
@@ -214,7 +232,7 @@ function TodoCreateForm({
   creating,
   compact,
 }: {
-  onCreate: (payload: TodoCreatePayload) => Promise<void>;
+  onCreate: (payload: TodoCreatePayload) => Promise<boolean>;
   creating: boolean;
   compact: boolean;
 }) {
@@ -229,12 +247,15 @@ function TodoCreateForm({
       return;
     }
 
-    await onCreate({
+    const created = await onCreate({
       content: trimmed,
       assignee: assignee.trim() || undefined,
       dueDate: dueDate || undefined,
       priority,
     });
+    if (!created) {
+      return;
+    }
     setContent("");
     setAssignee("");
     setDueDate("");
@@ -298,8 +319,8 @@ function TodoRow({
   todo: TodoItem;
   compact: boolean;
   meetingTitle: string | null;
-  onUpdate: (payload: TodoUpdatePayload) => Promise<void>;
-  onStatusChange: (status: TodoItem["status"]) => Promise<void>;
+  onUpdate: (payload: TodoUpdatePayload) => Promise<boolean>;
+  onStatusChange: (status: TodoItem["status"]) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(todo.content);
@@ -308,15 +329,18 @@ function TodoRow({
   const [priority, setPriority] = useState<TodoItem["priority"]>(todo.priority);
   const [logs, setLogs] = useState<TodoStatusLog[] | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
 
   async function saveEdits() {
-    await onUpdate({
+    const updated = await onUpdate({
       content: content.trim(),
       assignee: assignee.trim() || null,
       due_date: dueDate || null,
       priority,
     });
-    setEditing(false);
+    if (updated) {
+      setEditing(false);
+    }
   }
 
   async function toggleLogs() {
@@ -327,137 +351,168 @@ function TodoRow({
     setLogsOpen((current) => !current);
   }
 
+  async function changeStatus(status: TodoItem["status"]) {
+    if (statusUpdating) {
+      return;
+    }
+    setStatusUpdating(true);
+    try {
+      const updated = await onStatusChange(status);
+      if (updated) {
+        setLogs(null);
+        if (logsOpen) {
+          const response = await getTodoLogs(todo.id);
+          setLogs(response.items);
+        }
+      }
+    } finally {
+      setStatusUpdating(false);
+    }
+  }
+
   return (
     <Card className={`todo-item todo-card todo-card-${todo.status}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 gap-3">
-          <button
-            type="button"
-            className={`todo-check todo-check-${todo.status}`}
-            onClick={() =>
-              void onStatusChange(todo.status === "done" ? "pending" : "done")
-            }
-            aria-label="toggle todo status"
-          >
-            {todo.status === "done" ? "✓" : ""}
-          </button>
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`todo-status-badge todo-status-${todo.status}`}>
-                {TODO_STATUS_LABELS[todo.status]}
-              </span>
-              <span className={`todo-priority-badge todo-priority-${todo.priority}`}>
-                {TODO_PRIORITY_LABELS[todo.priority]}
-              </span>
-              {!compact && meetingTitle ? (
-                <span className="todo-meeting-badge">{meetingTitle}</span>
-              ) : null}
-            </div>
-            {editing ? (
-              <div className="space-y-3">
-                <textarea
-                  className="input-shell min-h-[88px]"
-                  value={content}
-                  onChange={(event) => setContent(event.target.value)}
-                />
-                <div className="grid gap-3 md:grid-cols-3">
-                  <input
-                    className="input-shell"
-                    value={assignee}
-                    onChange={(event) => setAssignee(event.target.value)}
-                    placeholder="负责人"
-                  />
-                  <input
-                    className="input-shell"
-                    type="date"
-                    value={dueDate}
-                    onChange={(event) => setDueDate(event.target.value)}
-                  />
-                  <select
-                    className="input-shell"
-                    value={priority}
-                    onChange={(event) =>
-                      setPriority(event.target.value as TodoItem["priority"])
-                    }
-                  >
-                    <option value="high">高优先级</option>
-                    <option value="medium">中优先级</option>
-                    <option value="low">低优先级</option>
-                  </select>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div
-                  className={`todo-main-text ${
-                    todo.status === "done" ? "todo-main-text-done" : ""
-                  }`}
-                >
-                  {todo.content}
-                </div>
-                <div className="flex flex-wrap gap-4 text-[13px] text-[var(--muted)]">
-                  <span>负责人：{todo.assignee || "未指定"}</span>
-                  <span>截止：{todo.due_date ? todo.due_date.slice(0, 10) : "未指定"}</span>
-                </div>
-              </>
-            )}
-          </div>
+      <div className="todo-card-header">
+        <button
+          type="button"
+          className={`todo-check todo-check-${todo.status}`}
+          onClick={() =>
+            void changeStatus(todo.status === "done" ? "pending" : "done")
+          }
+          aria-label="toggle todo status"
+          disabled={todo.status === "cancelled" || statusUpdating}
+        >
+          {todo.status === "done" ? "✓" : ""}
+        </button>
+        <div className="todo-card-badges">
+          <span className={`todo-status-badge todo-status-${todo.status}`}>
+            {TODO_STATUS_LABELS[todo.status]}
+          </span>
+          <span className={`todo-priority-badge todo-priority-${todo.priority}`}>
+            {TODO_PRIORITY_LABELS[todo.priority]}
+          </span>
+          {!compact && meetingTitle ? (
+            <span className="todo-meeting-badge">{meetingTitle}</span>
+          ) : null}
         </div>
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          {editing ? (
-            <>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setEditing(false)}
+      <div className="todo-card-body">
+        {editing ? (
+          <div className="space-y-3">
+            <textarea
+              className="input-shell min-h-[88px]"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+            />
+            <div className="grid gap-3 md:grid-cols-3">
+              <input
+                className="input-shell"
+                value={assignee}
+                onChange={(event) => setAssignee(event.target.value)}
+                placeholder="负责人"
+              />
+              <input
+                className="input-shell"
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+              />
+              <select
+                className="input-shell"
+                value={priority}
+                onChange={(event) =>
+                  setPriority(event.target.value as TodoItem["priority"])
+                }
               >
-                取消
-              </button>
+                <option value="high">高优先级</option>
+                <option value="medium">中优先级</option>
+                <option value="low">低优先级</option>
+              </select>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div
+              className={`todo-main-text ${
+                todo.status === "done" ? "todo-main-text-done" : ""
+              }`}
+            >
+              {todo.content}
+            </div>
+            <div className="todo-card-meta">
+              <span>负责人：{todo.assignee || "未指定"}</span>
+              <span>截止：{todo.due_date ? todo.due_date.slice(0, 10) : "未指定"}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="todo-card-actions">
+        {editing ? (
+          <>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setEditing(false)}
+            >
+              取消
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void saveEdits()}
+            >
+              保存
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setEditing(true)}
+            >
+              编辑
+            </button>
+            {todo.status === "pending" ? (
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => void saveEdits()}
+                onClick={() => void changeStatus("done")}
+                disabled={statusUpdating}
               >
-                保存
+                {statusUpdating ? "确认中..." : "确认完成"}
               </button>
-            </>
-          ) : (
-            <>
+            ) : null}
+            {todo.status !== "cancelled" ? (
               <button
-                className="secondary-button"
+                className="tertiary-button"
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={() => void changeStatus("cancelled")}
+                disabled={statusUpdating}
               >
-                编辑
+                取消待办
               </button>
-              {todo.status !== "cancelled" ? (
-                <button
-                  className="tertiary-button"
-                  type="button"
-                  onClick={() => void onStatusChange("cancelled")}
-                >
-                  取消待办
-                </button>
-              ) : (
-                <button
-                  className="tertiary-button"
-                  type="button"
-                  onClick={() => void onStatusChange("pending")}
-                >
-                  恢复待办
-                </button>
-              )}
+            ) : (
               <button
-                className="secondary-button"
+                className="tertiary-button"
                 type="button"
-                onClick={() => void toggleLogs()}
+                onClick={() => void changeStatus("pending")}
+                disabled={statusUpdating}
               >
-                {logsOpen ? "收起日志" : "查看日志"}
+                恢复待办
               </button>
-            </>
-          )}
-        </div>
+            )}
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void toggleLogs()}
+            >
+              {logsOpen ? "收起日志" : "查看日志"}
+            </button>
+          </>
+        )}
       </div>
 
       {logsOpen ? (

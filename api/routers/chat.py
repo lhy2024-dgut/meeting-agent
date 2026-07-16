@@ -46,6 +46,7 @@ def create_chat_session(
         meeting_ids = repo.list_meeting_ids_for_user(current_user.id)
 
     session = chat_session_manager.create_session(
+        user_id=current_user.id,
         mode=mode,
         meeting_id=meeting_id,
         meeting_ids=meeting_ids,
@@ -70,6 +71,8 @@ def send_chat_message(
     session = chat_session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Chat session does not belong to the current user")
 
     validation_error = session.agent.validate_input(payload.message)
     if validation_error:

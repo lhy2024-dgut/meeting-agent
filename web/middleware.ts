@@ -15,10 +15,6 @@ export function middleware(request: NextRequest) {
   }
 
   if (PUBLIC_PATHS.has(pathname)) {
-    const token = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
-    if (token) {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
     return NextResponse.next();
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useChatSession } from "@/hooks/use-chat-session";
+import { useAuth } from "@/components/providers/auth-provider";
 
 const SUGGESTIONS = [
   "\u4e3b\u8981\u8bae\u9898\u662f\u4ec0\u4e48\uff1f",
@@ -11,6 +12,7 @@ const SUGGESTIONS = [
 type MeetingChatProps = { meetingId: number; };
 
 export function MeetingChat({ meetingId }: MeetingChatProps) {
+  const { user } = useAuth();
   const {
     sessionId,
     messages,
@@ -24,6 +26,7 @@ export function MeetingChat({ meetingId }: MeetingChatProps) {
   } = useChatSession({
     mode: "single",
     meetingId,
+    userId: user?.id,
   });
 
   return (

@@ -260,7 +260,7 @@ class MinutesOutputParser(BaseOutputParser):
 
     def parse(self, text: str):
         def get_section(name):
-            pattern = rf"===\s*{name}\s*===\s*(.*?)(?===\s*\w+\s*===|$)"
+            pattern = rf"===\s*{name}\s*===\s*(.*?)(?====\s*\w+\s*===|$)"
             match = re.search(pattern, text or "", re.DOTALL | re.IGNORECASE)
             return match.group(1).strip() if match else ""
 
@@ -307,23 +307,9 @@ class MinutesOutputParser(BaseOutputParser):
         candidates = [minutes_block.group(1)] if minutes_block else [text]
 
         for block in candidates:
-            lines = block.split("\n")
-            todo_lines = []
-            in_todo_section = False
-            for line in lines:
-                stripped = line.strip()
-                if re.match(r"^- \[.\] ", stripped) or re.match(r"^- \[ \] ", stripped):
-                    todo_lines.append(stripped)
-                    in_todo_section = True
-                elif in_todo_section and stripped.startswith("- ") and not stripped.startswith("- ["):
-                    todo_lines.append(stripped)
-                elif in_todo_section and not stripped:
-                    continue  # 空行跳过
-                elif in_todo_section:
-                    break  # 非列表行 → 列表结束
-
+            todo_lines = re.findall(r"^\s*- \[[ x]\] .+$", block, re.MULTILINE)
             if todo_lines:
-                return "\n".join(todo_lines)
+                return "\n".join(line.strip() for line in todo_lines)
 
         # 策略 2：全文范围查找 - [ ] 格式
         all_todos = re.findall(r"^- \[[ x]\] .+", text or "", re.MULTILINE)
@@ -340,20 +326,9 @@ class MinutesOutputParser(BaseOutputParser):
         candidates = [minutes_block.group(1)] if minutes_block else [text]
 
         for block in candidates:
-            lines = block.split("\n")
-            res_lines = []
-            in_res_section = False
-            for line in lines:
-                stripped = line.strip()
-                if re.match(r"^\d+[\.\)、]\s+", stripped) or stripped.startswith("- 决议"):
-                    res_lines.append(stripped)
-                    in_res_section = True
-                elif in_res_section and not stripped:
-                    continue
-                elif in_res_section:
-                    break
+            res_lines = re.findall(r"^\s*(?:\d+[\.\)、]\s+.*|- 决议.*)$", block, re.MULTILINE)
             if res_lines:
-                return "\n".join(res_lines)
+                return "\n".join(line.strip() for line in res_lines)
 
         all_res = re.findall(r"^\d+[\.\)、]\s+.*$", text or "", re.MULTILINE)
         if all_res:

@@ -141,8 +141,8 @@ def login(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version or 0),
+        refresh_token=create_refresh_token(user.id, user.token_version or 0),
     )
 
 
@@ -160,15 +160,22 @@ def refresh_token(
     user = repo.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if token_payload.get("ver") != (user.token_version or 0):
+        raise HTTPException(status_code=401, detail="Refresh token has been revoked")
 
     return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        access_token=create_access_token(user.id, user.token_version or 0),
+        refresh_token=create_refresh_token(user.id, user.token_version or 0),
     )
 
 
 @router.post("/logout", response_model=AuthMutationResponse)
-def logout() -> AuthMutationResponse:
+def logout(
+    repo: MeetingRepository = Depends(get_meeting_repository),
+    current_user=Depends(get_current_user),
+) -> AuthMutationResponse:
+    if not repo.invalidate_user_tokens(current_user.id):
+        raise HTTPException(status_code=404, detail="User not found")
     return AuthMutationResponse(success=True)
 
 

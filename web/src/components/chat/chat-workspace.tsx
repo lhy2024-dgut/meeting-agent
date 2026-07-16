@@ -7,6 +7,7 @@ import { getMeeting, getTranscript } from "@/lib/api";
 import { formatMeetingListDate } from "@/lib/format";
 import { buildSourceLocatorSnippet, resolveSourcePreview } from "@/lib/source-target";
 import { useChatSession } from "@/hooks/use-chat-session";
+import { useAuth } from "@/components/providers/auth-provider";
 import {
   MeetingDetail,
   MeetingSourceType,
@@ -307,6 +308,7 @@ type ChatSessionPanelProps = {
 };
 
 function ChatSessionPanel({ mode, meeting, totalMeetings }: ChatSessionPanelProps) {
+  const { user } = useAuth();
   const initialAssistantMessage =
     mode === "cross"
       ? `您好，我可以从 ${totalMeetings} 场历史会议中检索相关信息来回答您的问题，回答时会注明内容来自哪场会议。`
@@ -326,6 +328,7 @@ function ChatSessionPanel({ mode, meeting, totalMeetings }: ChatSessionPanelProp
   } = useChatSession({
     mode,
     meetingId: mode === "single" ? meeting?.id ?? null : null,
+    userId: user?.id,
     enabled: mode === "cross" || Boolean(meeting),
     initialAssistantMessage,
     onBeforeBootstrap: clearMeetingContextCache,

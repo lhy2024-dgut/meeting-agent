@@ -153,6 +153,8 @@ def _get_meeting_todos(repo: MeetingRepository, user_id: int, meeting_id: int):
             due_date=item.due_date,
             status=item.status,
             priority=item.priority,
+            source=item.source,
+            is_user_modified=item.is_user_modified,
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
@@ -179,6 +181,7 @@ def list_meetings(
         "quiet": "安静",
         "noisy": "嘈杂",
         "multi_speaker": "多人",
+        "unknown": "未知",
     }
 
     meetings, total = repo.get_meetings_paginated(
