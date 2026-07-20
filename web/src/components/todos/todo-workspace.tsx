@@ -34,8 +34,14 @@ type TodoUpdatePayload = {
 };
 
 const DEFAULT_FILTERS: Filters = {
-  status: "pending",
+  status: "all",
   priority: "all",
+};
+
+const STATUS_SORT_ORDER: Record<TodoItem["status"], number> = {
+  pending: 0,
+  cancelled: 1,
+  done: 2,
 };
 
 const TODO_STATUS_LABELS: Record<TodoItem["status"], string> = {
@@ -69,15 +75,18 @@ export function TodoWorkspace({
 
   const visibleTodos = useMemo(
     () =>
-      todos.filter((item) => {
-        if (filters.status !== "all" && item.status !== filters.status) {
-          return false;
-        }
-        if (filters.priority !== "all" && item.priority !== filters.priority) {
-          return false;
-        }
-        return true;
-      }),
+      todos
+        .filter((item) => {
+          if (filters.status !== "all" && item.status !== filters.status) {
+            return false;
+          }
+          if (filters.priority !== "all" && item.priority !== filters.priority) {
+            return false;
+          }
+          return true;
+        })
+        // 未完成的排在前面，已完成的排在后面（组内保持原有顺序）
+        .sort((a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status]),
     [filters, todos],
   );
 
@@ -137,9 +146,7 @@ export function TodoWorkspace({
         status,
       });
       setTodos((current) =>
-        status === "done"
-          ? current.filter((item) => item.id !== todoId)
-          : current.map((item) => (item.id === todoId ? updated : item)),
+        current.map((item) => (item.id === todoId ? updated : item)),
       );
       return true;
     } catch (mutationError) {

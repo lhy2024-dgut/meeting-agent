@@ -32,6 +32,7 @@ export function MeetingEmailPanel({
   const [attachDocument, setAttachDocument] = useState(true);
   const [documentFormat, setDocumentFormat] = useState("docx");
   const [attachHtmlSummary, setAttachHtmlSummary] = useState(false);
+  const [htmlSummaryAvailable, setHtmlSummaryAvailable] = useState(false);
 
   const recipients = useMemo(() => {
     if (recipientMode === "contacts") {
@@ -57,9 +58,11 @@ export function MeetingEmailPanel({
     setLoading(true);
     setError("");
     try {
-      const contactResponse = await requestBrowserJson<{ items: Contact[] }>("/contacts");
-      const groupResponse = await requestBrowserJson<{ items: ContactGroup[] }>("/contact-groups");
-      const logResponse = await requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`);
+      const [contactResponse, groupResponse, logResponse] = await Promise.all([
+        requestBrowserJson<{ items: Contact[] }>("/contacts"),
+        requestBrowserJson<{ items: ContactGroup[] }>("/contact-groups"),
+        requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`),
+      ]);
       setContacts(contactResponse.items);
       setGroups(groupResponse.items);
       setLogs(logResponse.items);
@@ -70,12 +73,25 @@ export function MeetingEmailPanel({
     }
   }, [meetingId]);
 
+  // 由父页面通过 prop 或 HtmlSummaryPanel 通知是否已生成，
+  // 避免在此重复发起 html-summary 请求造成不必要的 401 噪音。
+  const checkHtmlSummary = useCallback(async () => {
+    try {
+      await requestBrowserJson<{ html: string }>(`/meetings/${meetingId}/html-summary`);
+      setHtmlSummaryAvailable(true);
+    } catch {
+      setHtmlSummaryAvailable(false);
+      setAttachHtmlSummary(false);
+    }
+  }, [meetingId]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadData();
+      void checkHtmlSummary();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadData]);
+  }, [checkHtmlSummary, loadData]);
 
   async function handleSend() {
     if (!subject.trim()) {
@@ -97,11 +113,11 @@ export function MeetingEmailPanel({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-        recipient_emails: recipients,
-        subject: subject.trim(),
-        attach_minutes_document: attachDocument,
-        document_format: documentFormat,
-        attach_html_summary: attachHtmlSummary,
+          recipient_emails: recipients,
+          subject: subject.trim(),
+          attach_minutes_document: attachDocument,
+          document_format: documentFormat,
+          attach_html_summary: attachHtmlSummary,
         }),
       });
       setResult(response);
@@ -112,6 +128,18 @@ export function MeetingEmailPanel({
     } finally {
       setSending(false);
     }
+  }
+
+  function toggleContactId(id: number) {
+    setSelectedContactIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  }
+
+  function toggleGroupId(id: number) {
+    setSelectedGroupIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
   }
 
   return (
@@ -151,39 +179,43 @@ export function MeetingEmailPanel({
             <div className="space-y-3">
               <div className="text-[13px] font-semibold text-[var(--text-secondary)]">收件人</div>
               {recipientMode === "contacts" ? (
-                <select
-                  multiple
-                  className="input-shell min-h-[180px]"
-                  value={selectedContactIds.map(String)}
-                  onChange={(event) =>
-                    setSelectedContactIds(
-                      Array.from(event.target.selectedOptions).map((item) => Number(item.value)),
-                    )
-                  }
-                >
-                  {contacts.map((contact) => (
-                    <option key={contact.id} value={contact.id}>
-                      {contact.name} &lt;{contact.email}&gt;
-                    </option>
-                  ))}
-                </select>
+                contacts.length === 0 ? (
+                  <div className="text-[13px] text-[var(--muted)]">暂无联系人，请先在联系人页面添加。</div>
+                ) : (
+                  <div className="space-y-2 rounded-[12px] border border-[var(--border)] bg-[var(--card-bg)] p-3 max-h-[220px] overflow-y-auto">
+                    {contacts.map((contact) => (
+                      <label key={contact.id} className="flex items-center gap-2 cursor-pointer text-[14px] text-[var(--text)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedContactIds.includes(contact.id)}
+                          onChange={() => toggleContactId(contact.id)}
+                        />
+                        <span className="min-w-0 truncate">
+                          {contact.name} <span className="text-[var(--muted)]">&lt;{contact.email}&gt;</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )
               ) : (
-                <select
-                  multiple
-                  className="input-shell min-h-[180px]"
-                  value={selectedGroupIds.map(String)}
-                  onChange={(event) =>
-                    setSelectedGroupIds(
-                      Array.from(event.target.selectedOptions).map((item) => Number(item.value)),
-                    )
-                  }
-                >
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.group_name} ({group.members.length} 人)
-                    </option>
-                  ))}
-                </select>
+                groups.length === 0 ? (
+                  <div className="text-[13px] text-[var(--muted)]">暂无群组，请先在联系人页面创建群组。</div>
+                ) : (
+                  <div className="space-y-2 rounded-[12px] border border-[var(--border)] bg-[var(--card-bg)] p-3 max-h-[220px] overflow-y-auto">
+                    {groups.map((group) => (
+                      <label key={group.id} className="flex items-center gap-2 cursor-pointer text-[14px] text-[var(--text)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedGroupIds.includes(group.id)}
+                          onChange={() => toggleGroupId(group.id)}
+                        />
+                        <span className="min-w-0 truncate">
+                          {group.group_name} <span className="text-[var(--muted)]">({group.members.length} 人)</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )
               )}
               <div className="text-[12px] text-[var(--muted)]">
                 已选择 {recipients.length} 个收件人。
@@ -210,13 +242,15 @@ export function MeetingEmailPanel({
                 <option value="md">md</option>
                 <option value="pdf">pdf</option>
               </select>
-              <label className="flex items-center gap-2 text-[14px] text-[var(--text)]">
+              <label className={`flex items-center gap-2 text-[14px] ${htmlSummaryAvailable ? "text-[var(--text)]" : "text-[var(--muted)]"}`}>
                 <input
                   type="checkbox"
                   checked={attachHtmlSummary}
+                  disabled={!htmlSummaryAvailable}
                   onChange={(event) => setAttachHtmlSummary(event.target.checked)}
                 />
                 附带 HTML 摘要
+                {!htmlSummaryAvailable ? <span className="text-[12px]">（未生成）</span> : null}
               </label>
             </div>
           </div>

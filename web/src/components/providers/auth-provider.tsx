@@ -4,8 +4,17 @@ import { createContext, ReactNode, useContext, useEffect, useState } from "react
 import { usePathname, useRouter } from "next/navigation";
 
 import { CurrentUser } from "@/types/api";
-import { clearAuthTokens, isAuthPath, setAuthTokens } from "@/lib/auth";
-import { getCurrentUser, loginUser, logoutUser, registerUser } from "@/lib/api";
+import {
+  clearAuthTokens,
+  getAccessTokenClient,
+  getRefreshTokenClient,
+  isAuthPath,
+  setAuthTokens,
+} from "@/lib/auth";
+import { loginUser, logoutUser, registerUser } from "@/lib/api";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 type AuthContextValue = {
   user: CurrentUser | null;
@@ -24,6 +33,43 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function fetchCurrentUser(token?: string | null): Promise<CurrentUser | null> {
+  try {
+    const headers = new Headers();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as CurrentUser;
+  } catch {
+    return null;
+  }
+}
+
+async function silentRefresh(): Promise<string | null> {
+  const refreshToken = getRefreshTokenClient();
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { access_token?: string; refresh_token?: string };
+    if (!data.access_token || !data.refresh_token) return null;
+    setAuthTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -32,17 +78,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function refreshUser() {
     setLoading(true);
-    try {
-      const nextUser = await getCurrentUser();
-      setUser(nextUser);
-      if (pathname && isAuthPath(pathname)) {
-        router.replace("/");
+
+    let token = getAccessTokenClient();
+    let currentUser = await fetchCurrentUser(token);
+
+    if (!currentUser) {
+      const newToken = await silentRefresh();
+      if (newToken) {
+        token = newToken;
+        currentUser = await fetchCurrentUser(token);
       }
-    } catch {
+    }
+
+    if (!currentUser) {
       clearAuthTokens();
       setUser(null);
-    } finally {
       setLoading(false);
+      if (pathname && !isAuthPath(pathname)) {
+        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      }
+      return;
+    }
+
+    setUser(currentUser);
+    setLoading(false);
+    if (pathname && isAuthPath(pathname)) {
+      router.replace("/");
     }
   }
 

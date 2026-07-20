@@ -51,10 +51,11 @@ export function UploadPage({ metadata }: UploadPageProps) {
   const [scene, setScene] = useState(metadata.scenes[0]?.scene ?? "");
   const [terms, setTerms] = useState("");
   const [templateName, setTemplateName] = useState("");
+  const [templates, setTemplates] = useState<TemplateOption[]>(metadata.templates);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedTemplate = metadata.templates.find((item) => item.name === templateName) ?? null;
+  const selectedTemplate = templates.find((item) => item.name === templateName) ?? null;
   const effectiveOutputFormat = getCompatibleOutputFormat(outputFormat, selectedTemplate);
 
   const { job, startPolling } = useJobPolling({
@@ -112,8 +113,20 @@ export function UploadPage({ metadata }: UploadPageProps) {
 
   function handleTemplateChange(nextTemplateName: string) {
     setTemplateName(nextTemplateName);
-    const nextTemplate = metadata.templates.find((item) => item.name === nextTemplateName) ?? null;
+    const nextTemplate = templates.find((item) => item.name === nextTemplateName) ?? null;
     setOutputFormat((current) => getCompatibleOutputFormat(current, nextTemplate));
+  }
+
+  async function handleTemplatesRefresh() {
+    try {
+      const response = await fetch(`${apiBaseUrl}/meta/upload`);
+      if (response.ok) {
+        const data = await response.json() as { templates: TemplateOption[] };
+        setTemplates(data.templates ?? []);
+      }
+    } catch {
+      // 刷新失败静默处理
+    }
   }
 
   return (
@@ -143,7 +156,7 @@ export function UploadPage({ metadata }: UploadPageProps) {
             <div className="info-strip text-[13px] text-[var(--text-secondary)]">{metadata.scenes.find((item) => item.scene === scene)?.description || "选择适合会议场景的纪要结构模板。"}</div>
           </div>
 
-          <TemplatePicker apiBaseUrl={apiBaseUrl} outputFormat={effectiveOutputFormat} selectedTemplateName={templateName} templates={metadata.templates} onChange={handleTemplateChange} />
+          <TemplatePicker apiBaseUrl={apiBaseUrl} outputFormat={effectiveOutputFormat} selectedTemplateName={templateName} templates={templates} onChange={handleTemplateChange} onTemplatesRefresh={() => void handleTemplatesRefresh()} />
 
           <div className="info-strip text-[13px] text-[var(--text-secondary)]">
             默认使用 SenseVoiceSmall 转写、512 字 RAG 切分和自动转写策略。
@@ -177,44 +190,85 @@ export function UploadPage({ metadata }: UploadPageProps) {
   );
 }
 
-type TemplatePickerProps = { apiBaseUrl: string; outputFormat: string; selectedTemplateName: string; templates: TemplateOption[]; onChange: (value: string) => void; };
+type TemplatePickerProps = { apiBaseUrl: string; outputFormat: string; selectedTemplateName: string; templates: TemplateOption[]; onChange: (value: string) => void; onTemplatesRefresh: () => void; };
 
-function TemplatePicker({ apiBaseUrl, outputFormat, selectedTemplateName, templates, onChange }: TemplatePickerProps) {
+function TemplatePicker({ apiBaseUrl, outputFormat, selectedTemplateName, templates, onChange, onTemplatesRefresh }: TemplatePickerProps) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  async function handleTemplateUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${apiBaseUrl}/meta/templates/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { detail?: string };
+        throw new Error(body.detail || "上传失败");
+      }
+      onTemplatesRefresh();
+    } catch (uploadErr) {
+      setUploadError(uploadErr instanceof Error ? uploadErr.message : "上传失败");
+    } finally {
+      setUploading(false);
+      event.target.value = "";
+    }
+  }
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="section-card-title mb-1">{"导出模板"}</div>
           <div className="text-[13px] text-[var(--text-secondary)]">{"选择模板后会按对应版式导出，支持直接预览封面样式。"}</div>
         </div>
-        <button className={selectedTemplateName ? "secondary-button" : "primary-button"} type="button" onClick={() => onChange("")}>{"默认模板"}</button>
+        <div className="flex flex-wrap gap-2">
+          <button className={selectedTemplateName ? "secondary-button" : "primary-button"} type="button" onClick={() => onChange("")}>{"默认模板"}</button>
+          <label className="tertiary-button cursor-pointer">
+            {uploading ? "上传中..." : "上传模板"}
+            <input className="hidden" type="file" accept=".docx,.pdf" disabled={uploading} onChange={(e) => void handleTemplateUpload(e)} />
+          </label>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {templates.map((template) => {
-          const selected = selectedTemplateName === template.name;
-          const supportsCurrentFormat = outputFormat === "docx" ? template.has_docx : outputFormat === "pdf" ? template.has_pdf : true;
-          return (
-            <button key={template.name} className={`template-card ${selected ? "template-card-active" : ""}`.trim()} type="button" onClick={() => onChange(template.name)}>
-              <div className="template-card-preview">
-                {template.preview_path ? <Image alt={`${template.label} 预览`} className="template-card-image" src={`${apiBaseUrl}${template.preview_path}`} width={640} height={400} unoptimized /> : <div className="template-card-placeholder">{"无预览图"}</div>}
-              </div>
-              <div className="space-y-2 text-left">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold text-[var(--dark)]">{template.label}</div>
-                  {selected ? <span className="template-card-badge">{"已选择"}</span> : null}
+      {uploadError ? <div className="error-inline">{uploadError}</div> : null}
+
+      {templates.length === 0 ? (
+        <div className="text-[13px] text-[var(--muted)]">暂无自定义模板，点击「上传模板」添加 .docx 或 .pdf 模板文件。</div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {templates.map((template) => {
+            const selected = selectedTemplateName === template.name;
+            const supportsCurrentFormat = outputFormat === "docx" ? template.has_docx : outputFormat === "pdf" ? template.has_pdf : true;
+            return (
+              <button key={template.name} className={`template-card ${selected ? "template-card-active" : ""}`.trim()} type="button" onClick={() => onChange(template.name)}>
+                <div className="template-card-preview">
+                  {template.preview_path ? <Image alt={`${template.label} 预览`} className="template-card-image" src={`${apiBaseUrl}${template.preview_path}`} width={640} height={400} unoptimized /> : <div className="template-card-placeholder">{"无预览图"}</div>}
                 </div>
-                <div className="flex flex-wrap gap-2 text-[12px]">
-                  <span className={`template-format-pill ${template.has_docx ? "is-on" : "is-off"}`}>DOCX</span>
-                  <span className={`template-format-pill ${template.has_pdf ? "is-on" : "is-off"}`}>PDF</span>
-                  <span className="template-format-pill is-on">MD</span>
+                <div className="space-y-2 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-semibold text-[var(--dark)]">{template.label}</div>
+                    {selected ? <span className="template-card-badge">{"已选择"}</span> : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[12px]">
+                    <span className={`template-format-pill ${template.has_docx ? "is-on" : "is-off"}`}>DOCX</span>
+                    <span className={`template-format-pill ${template.has_pdf ? "is-on" : "is-off"}`}>PDF</span>
+                    <span className="template-format-pill is-on">MD</span>
+                  </div>
+                  <div className={`text-[12px] ${supportsCurrentFormat ? "text-[var(--muted)]" : "text-[#dc2626]"}`}>{supportsCurrentFormat ? `当前导出格式 ${outputFormat.toUpperCase()} 可用` : `当前导出格式 ${outputFormat.toUpperCase()} 不支持该模板，将自动切换可用格式`}</div>
                 </div>
-                <div className={`text-[12px] ${supportsCurrentFormat ? "text-[var(--muted)]" : "text-[#dc2626]"}`}>{supportsCurrentFormat ? `当前导出格式 ${outputFormat.toUpperCase()} 可用` : `当前导出格式 ${outputFormat.toUpperCase()} 不支持该模板，将自动切换可用格式`}</div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

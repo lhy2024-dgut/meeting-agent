@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError, createChatSession, sendChatMessage } from "@/lib/api";
-import { ChatMemoryStats, RagResultItem } from "@/types/api";
+import { ApiError, sendChatMessage } from "@/lib/api";
+import { requestBrowserJson } from "@/lib/browser-api";
+import { ChatMemoryStats, ChatSessionCreateResponse, RagResultItem } from "@/types/api";
 
 export type ChatMode = "single" | "cross";
 
@@ -111,10 +112,20 @@ export function useChatSession({
       setInput("");
       setError("");
       try {
-        const session = await createChatSession({
-          mode,
-          meeting_id: mode === "single" ? meetingId ?? undefined : undefined,
-        });
+        // 使用 requestBrowserJson 代替 createChatSession（api.ts / requestJson），
+        // 避免 401 时 handleUnauthorized 清除 token 并触发跳转登录。
+        // 聊天会话初始化失败只需显示错误消息，不应让整个页面的认证状态失效。
+        const session = await requestBrowserJson<ChatSessionCreateResponse>(
+          "/chat/sessions",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode,
+              meeting_id: mode === "single" ? meetingId ?? undefined : undefined,
+            }),
+          },
+        );
         if (!active || bootstrapRef.current !== currentBootstrap) {
           return;
         }

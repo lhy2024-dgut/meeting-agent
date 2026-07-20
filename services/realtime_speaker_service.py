@@ -15,11 +15,15 @@ class RealtimeSpeakerService:
 
         from funasr import AutoModel
 
+        # 用本地绝对路径加载，避免短名（paraformer-zh 等）在线名称解析失败
+        # 导致 "model 'paraformer-zh' is not registered"。
+        from services.realtime_asr_service import _local_model
+
         self._model = AutoModel(
-            model="paraformer-zh",
-            vad_model="fsmn-vad",
-            punc_model="ct-punc",
-            spk_model="cam++",
+            model=_local_model("paraformer-zh"),
+            vad_model=_local_model("fsmn-vad"),
+            punc_model=_local_model("ct-punc"),
+            spk_model=_local_model("cam++"),
             disable_update=True,
         )
 

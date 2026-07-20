@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { getMeetingTerms, regenerateMeeting } from "@/lib/api";
+import { regenerateMeeting } from "@/lib/api";
+import { requestBrowserJson } from "@/lib/browser-api";
+import { MeetingTermsResponse } from "@/types/api";
 import { useJobPolling } from "@/hooks/use-job-polling";
 
 type MeetingRegeneratePanelProps = { meetingId: number; };
@@ -37,7 +39,11 @@ export function MeetingRegeneratePanel({ meetingId }: MeetingRegeneratePanelProp
     async function loadTerms() {
       try {
         setLoadingTerms(true);
-        const response = await getMeetingTerms(meetingId);
+        // 用 requestBrowserJson 代替 getMeetingTerms（api.ts），避免 401 时
+        // handleUnauthorized 清除 token 并触发跳转登录。
+        const response = await requestBrowserJson<MeetingTermsResponse>(
+          `/meetings/${meetingId}/terms`,
+        );
         if (!ignore) setTermsText(response.terms.join("\n"));
       } catch (loadError) {
         if (!ignore) setError(loadError instanceof Error ? loadError.message : "加载术语词表失败");
