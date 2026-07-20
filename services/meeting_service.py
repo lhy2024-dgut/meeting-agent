@@ -12,7 +12,12 @@ from chains.minutes_chain import (
     PLACEHOLDER_NO_RESOLUTION,
     normalize_structured_minutes_output,
 )
-from engines.asr_engine import ASREngine, _PARALLEL_MIN_SEC, _get_audio_duration, get_asr_engine
+from engines.asr_engine import (
+    ASREngine,
+    _PARALLEL_MIN_SEC,
+    _get_audio_duration,
+    get_asr_engine,
+)
 from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
@@ -301,10 +306,15 @@ class MeetingService:
         if progress_callback:
             progress_callback(55, "📊 分析会议特征...")
         duration = max((seg.get("end", 0) for seg in segments), default=0)
-        duration_category = ASREngine.classify_duration(duration)
-        environment = "unknown"
+        duration_category, environment = self._classify_without_diarization(duration)
         meeting_id = self.db.create_meeting(
-            title, file_path, duration_category, environment, file_hash, user_id=user_id
+            title,
+            file_path,
+            duration_category,
+            environment,
+            file_hash,
+            user_id=user_id,
+            created_at=meeting_dt,
         )
 
         if terms:
@@ -431,7 +441,6 @@ class MeetingService:
         except Exception as exc:
             logger.warning("加载 auto_summary 模板失败: %s", exc)
             return (minutes or "")[:200], "未分类"
-
         try:
             llm = get_llm(temperature=0.1)
             response = llm.invoke(system_prompt)
@@ -453,15 +462,7 @@ class MeetingService:
             return (minutes or "")[:200], "未分类"
 
     @staticmethod
-    def _estimate_speaker_count_heuristic(segments):
-        """启发式估计说话人数，仅供 UI 展示参考。"""
-        if not segments:
-            return 1
-        avg = sum(seg.get("duration", 0.0) for seg in segments) / max(len(segments), 1)
-        if avg < 3:
-            return 4
-        if avg < 5:
-            return 3
-        if avg < 15:
-            return 2
-        return 1
+    def _classify_without_diarization(duration: float) -> tuple[str, str]:
+        """Avoid presenting ASR segment timing or audio level as environment evidence."""
+        return ASREngine.classify_meeting_type(duration, num_speakers=None)
+

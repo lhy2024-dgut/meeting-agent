@@ -27,6 +27,7 @@ const ENVIRONMENT_OPTIONS = [
   { value: "quiet", label: "\u5b89\u9759" },
   { value: "noisy", label: "\u5624\u6742" },
   { value: "multi_speaker", label: "\u591a\u4eba" },
+  { value: "unknown", label: "\u672a\u77e5" },
 ];
 
 export function HistoryPage({ data, filters }: HistoryPageProps) {

@@ -4,6 +4,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  Legend,
   Line,
   LineChart,
   Pie,
@@ -20,6 +22,8 @@ import { StatsOverviewResponse } from "@/types/api";
 type StatsChartsProps = {
   stats: StatsOverviewResponse;
 };
+
+const ENVIRONMENT_COLORS = ["#0f766e", "#d97706", "#2563eb"];
 
 export function StatsCharts({ stats }: StatsChartsProps) {
   return (
@@ -50,14 +54,38 @@ export function StatsCharts({ stats }: StatsChartsProps) {
                   dataKey="count"
                   nameKey="label"
                   outerRadius={108}
-                  fill="#5B5EA6"
-                />
+                >
+                  {stats.environment_distribution.map((item, index) => (
+                    <Cell
+                      key={item.key}
+                      fill={ENVIRONMENT_COLORS[index % ENVIRONMENT_COLORS.length]}
+                    />
+                  ))}
+                </Pie>
                 <Tooltip />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </div>
         </Card>
       </div>
+
+      {stats.todo_assignee_distribution.length > 0 ? (
+        <Card>
+          <div className="chart-title">待办负责人分布</div>
+          <div className="chart-box">
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={stats.todo_assignee_distribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="label" stroke="#64748B" />
+                <YAxis stroke="#64748B" allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="count" fill="#0f766e" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      ) : null}
 
       {stats.monthly_trend.length >= 2 ? (
         <Card>

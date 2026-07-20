@@ -31,10 +31,11 @@ def validate_password_strength(password: str) -> None:
         raise AuthError("Password must contain at least one digit")
 
 
-def _build_token(user_id: int, token_type: str, expire_days: int) -> str:
+def _build_token(user_id: int, token_version: int, token_type: str, expire_days: int) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
+        "ver": token_version,
         "type": token_type,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(days=expire_days)).timestamp()),
@@ -42,12 +43,12 @@ def _build_token(user_id: int, token_type: str, expire_days: int) -> str:
     return jwt.encode(payload, config.JWT_SECRET_KEY, algorithm=config.JWT_ALGORITHM)
 
 
-def create_access_token(user_id: int) -> str:
-    return _build_token(user_id, "access", config.JWT_EXPIRE_DAYS)
+def create_access_token(user_id: int, token_version: int = 0) -> str:
+    return _build_token(user_id, token_version, "access", config.JWT_EXPIRE_DAYS)
 
 
-def create_refresh_token(user_id: int) -> str:
-    return _build_token(user_id, "refresh", config.REFRESH_TOKEN_EXPIRE_DAYS)
+def create_refresh_token(user_id: int, token_version: int = 0) -> str:
+    return _build_token(user_id, token_version, "refresh", config.REFRESH_TOKEN_EXPIRE_DAYS)
 
 
 def decode_token(token: str, expected_type: str | None = None) -> dict:

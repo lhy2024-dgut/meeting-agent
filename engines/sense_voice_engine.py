@@ -277,8 +277,12 @@ class SenseVoiceEngine:
         return "long"
 
     @staticmethod
-    def classify_meeting_type(duration, num_speakers=1, noise_level=0.3):
-        return SenseVoiceEngine.classify_duration(duration), "unknown"
+    def classify_meeting_type(duration, num_speakers=None, noise_level=None):
+        if num_speakers is not None and num_speakers >= 2:
+            environment = "multi_speaker"
+        else:
+            environment = "unknown"
+        return SenseVoiceEngine.classify_duration(duration), environment
 
 
 _sv_engine_instance: SenseVoiceEngine | None = None

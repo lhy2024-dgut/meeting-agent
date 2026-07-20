@@ -320,6 +320,11 @@ def _get_audio_info(audio_path):
         return 0, 0.3
 
 
+def get_audio_info(audio_path: str) -> tuple[float, float]:
+    """Return audio duration and a normalized noise estimate for meeting metadata."""
+    return _get_audio_info(audio_path)
+
+
 class ASREngine:
     """语音识别引擎，基于 Faster-Whisper (CTranslate2)。"""
 
@@ -440,8 +445,12 @@ class ASREngine:
         return "long"
 
     @staticmethod
-    def classify_meeting_type(duration, num_speakers, noise_level):
-        return ASREngine.classify_duration(duration), "unknown"
+    def classify_meeting_type(duration, num_speakers=None, noise_level=None):
+        if num_speakers is not None and num_speakers >= 2:
+            environment = "multi_speaker"
+        else:
+            environment = "unknown"
+        return ASREngine.classify_duration(duration), environment
 
 
 _asr_engine_instance: ASREngine | None = None

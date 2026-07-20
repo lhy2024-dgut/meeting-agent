@@ -7,7 +7,7 @@ const ACCESS_TOKEN_COOKIE = "meeting_agent_access_token";
 const REFRESH_TOKEN_COOKIE = "meeting_agent_refresh_token";
 
 const USE_ADMIN_ACCOUNT =
-  (process.env.PLAYWRIGHT_E2E_USE_ADMIN || "true").toLowerCase() !== "false";
+  (process.env.PLAYWRIGHT_E2E_USE_ADMIN || "false").toLowerCase() === "true";
 
 const TEST_USER = {
   username: process.env.PLAYWRIGHT_E2E_USERNAME || (USE_ADMIN_ACCOUNT ? "admin" : "e2e_user"),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { requestBrowserJson } from "@/lib/browser-api";
 import { Contact, ContactGroup, EmailLog, MeetingEmailSendResponse } from "@/types/api";
@@ -34,11 +34,6 @@ export function MeetingEmailPanel({
   const [attachHtmlSummary, setAttachHtmlSummary] = useState(false);
   const [htmlSummaryAvailable, setHtmlSummaryAvailable] = useState(false);
 
-  useEffect(() => {
-    void loadData();
-    void checkHtmlSummary();
-  }, [meetingId]);
-
   const recipients = useMemo(() => {
     if (recipientMode === "contacts") {
       return Array.from(
@@ -59,7 +54,7 @@ export function MeetingEmailPanel({
     );
   }, [contacts, groups, recipientMode, selectedContactIds, selectedGroupIds]);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -76,7 +71,15 @@ export function MeetingEmailPanel({
     } finally {
       setLoading(false);
     }
-  }
+  }, [meetingId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadData();
+      void checkHtmlSummary();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
 
   // 由父页面通过 prop 或 HtmlSummaryPanel 通知是否已生成，
   // 避免在此重复发起 html-summary 请求造成不必要的 401 噪音。

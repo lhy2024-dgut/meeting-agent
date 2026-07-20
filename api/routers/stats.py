@@ -29,12 +29,17 @@ def get_stats_overview(
             label=config.ENV_LABELS.get(key, key),
             count=stats["environment_distribution"].get(key, 0),
         )
-        for key in ("quiet", "noisy", "multi_speaker")
+        for key in ("quiet", "noisy", "multi_speaker", "unknown")
     ]
     monthly_trend = [
         TrendItem(month=item["month"], count=item["count"])
         for item in stats["monthly_trend"]
     ]
+    todo_assignee_distribution = [
+        DistributionItem(key=item["key"], label=item["key"], count=item["count"])
+        for item in stats["todo_assignee_distribution"]
+    ]
+    total_todos = stats["total_todos"]
 
     return StatsOverviewResponse(
         total_meetings=stats["total_meetings"],
@@ -42,6 +47,13 @@ def get_stats_overview(
         medium_meetings=stats["medium_meetings"],
         long_meetings=stats["long_meetings"],
         multi_speaker_meetings=stats["multi_speaker_meetings"],
+        total_todos=total_todos,
+        completed_todos=stats["completed_todos"],
+        overdue_todos=stats["overdue_todos"],
+        todo_completion_rate=round(stats["completed_todos"] / total_todos * 100, 1)
+        if total_todos
+        else 0,
+        todo_assignee_distribution=todo_assignee_distribution,
         duration_distribution=duration_distribution,
         environment_distribution=environment_distribution,
         monthly_trend=monthly_trend,

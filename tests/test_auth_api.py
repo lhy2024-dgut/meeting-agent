@@ -89,6 +89,71 @@ def test_me_accepts_access_token_cookie(tmp_path):
     assert me.json()["username"] == "cookie-user"
 
 
+def test_logout_revokes_access_and_refresh_tokens(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "logout-user",
+            "email": "logout@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "logout-user", "password": "StrongPass1"},
+    )
+    tokens = login.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert client.post("/api/auth/logout", headers=headers).status_code == 200
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    ).status_code == 401
+
+
+def test_password_change_revokes_existing_tokens(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "password-user",
+            "email": "password@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "password-user", "password": "StrongPass1"},
+    )
+    tokens = login.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    changed = client.post(
+        "/api/auth/password",
+        headers=headers,
+        json={"current_password": "StrongPass1", "new_password": "NewStrongPass2"},
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    ).status_code == 401
+
+
 def test_register_rejects_duplicates_and_weak_password(tmp_path):
     repo = _build_repo(tmp_path)
     app = FastAPI()

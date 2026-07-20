@@ -23,7 +23,7 @@ export function StatsPage({ stats }: StatsPageProps) {
     <div className="space-y-6">
       <h1 className="page-title">\u6570\u636E\u7EDF\u8BA1</h1>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card className="metric-box">
           <div className="metric-native">{stats.total_meetings}</div>
           <div className="metric-caption">\u603B\u4F1A\u8BAE</div>
@@ -34,9 +34,13 @@ export function StatsPage({ stats }: StatsPageProps) {
         </Card>
         <Card className="metric-box">
           <div className="metric-native accent-number">
-            {stats.multi_speaker_meetings}
+            {stats.todo_completion_rate}%
           </div>
-          <div className="metric-caption">\u591A\u4EBA\u4F1A\u8BAE</div>
+          <div className="metric-caption">待办完成率</div>
+        </Card>
+        <Card className="metric-box">
+          <div className="metric-native">{stats.overdue_todos}</div>
+          <div className="metric-caption">逾期待办</div>
         </Card>
       </div>
 

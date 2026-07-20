@@ -12,6 +12,8 @@ class TodoItemResponse(BaseModel):
     due_date: datetime | None = None
     status: str
     priority: str
+    source: str
+    is_user_modified: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -46,7 +48,6 @@ class TodoUpdateRequest(BaseModel):
 
 class TodoStatusUpdateRequest(BaseModel):
     status: str
-    changed_by: str = "manual"
     reason: str | None = None
 
 

@@ -212,18 +212,21 @@ class ChatAgent:
         return "当前会话未能及时完成大模型生成，请稍后重试。"
 
     def _invoke_llm_with_timeout(self, messages: list) -> AIMessage:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(self.llm.invoke, messages)
-            try:
-                response = future.result(timeout=self.LLM_TIMEOUT_SECONDS)
-                if isinstance(response, AIMessage):
-                    return response
-                content = getattr(response, "content", None) or str(response)
-                return AIMessage(content=content)
-            except FutureTimeoutError:
-                logger.warning("ChatAgent LLM invoke timed out after %ss", self.LLM_TIMEOUT_SECONDS)
-            except Exception as exc:
-                logger.warning("ChatAgent LLM invoke failed: %s", exc)
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.llm.invoke, messages)
+        try:
+            response = future.result(timeout=self.LLM_TIMEOUT_SECONDS)
+            if isinstance(response, AIMessage):
+                return response
+            content = getattr(response, "content", None) or str(response)
+            return AIMessage(content=content)
+        except FutureTimeoutError:
+            logger.warning("ChatAgent LLM invoke timed out after %ss", self.LLM_TIMEOUT_SECONDS)
+        except Exception as exc:
+            logger.warning("ChatAgent LLM invoke failed: %s", exc)
+        finally:
+            # Do not wait for a blocked model call while serving the fallback response.
+            executor.shutdown(wait=False, cancel_futures=True)
 
         return AIMessage(content=self._build_fallback_response())
 

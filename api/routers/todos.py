@@ -11,7 +11,7 @@ from api.schemas.todos import (
     TodoUpdateRequest,
 )
 from db.repository import MeetingRepository
-from services.todo_service import TodoService, TodoTransitionError
+from services.todo_service import TodoService, TodoTransitionError, _UNSET
 
 router = APIRouter(prefix="/api", tags=["todos"])
 
@@ -26,6 +26,8 @@ def _serialize_todo(todo) -> TodoItemResponse:
         due_date=todo.due_date,
         status=todo.status,
         priority=todo.priority,
+        source=todo.source,
+        is_user_modified=todo.is_user_modified,
         created_at=todo.created_at,
         updated_at=todo.updated_at,
     )
@@ -102,8 +104,8 @@ def update_todo(
             current_user.id,
             todo_id,
             content=payload.content,
-            assignee=payload.assignee,
-            due_date=payload.due_date,
+            assignee=payload.assignee if "assignee" in payload.model_fields_set else _UNSET,
+            due_date=payload.due_date if "due_date" in payload.model_fields_set else _UNSET,
             priority=payload.priority,
         )
     except ValueError as exc:
@@ -126,7 +128,6 @@ def update_todo_status(
             current_user.id,
             todo_id,
             to_status=payload.status,
-            changed_by=payload.changed_by,
             reason=payload.reason,
         )
     except TodoTransitionError as exc:

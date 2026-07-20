@@ -7,7 +7,7 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload, lazyload
 
 from db.engine import get_engine, get_session_factory
-from db.models import Contact, ContactGroup, EmailLog, Meeting, Transcription, User
+from db.models import Contact, ContactGroup, EmailLog, Meeting, TodoItem, Transcription, User
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -143,6 +143,16 @@ class MeetingRepository:
             if not user:
                 return False
             user.password_hash = password_hash
+            user.token_version = (user.token_version or 0) + 1
+            session.flush()
+            return True
+
+    def invalidate_user_tokens(self, user_id):
+        with self._write_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return False
+            user.token_version = (user.token_version or 0) + 1
             session.flush()
             return True
 
@@ -183,6 +193,7 @@ class MeetingRepository:
         environment,
         file_hash="",
         user_id=None,
+        created_at=None,
     ):
         with self._write_session() as session:
             owner_id = user_id or self._ensure_default_user(session).id
@@ -193,7 +204,7 @@ class MeetingRepository:
                 duration_category=duration_category,
                 environment=environment,
                 file_hash=file_hash,
-                created_at=datetime.now(),
+                created_at=created_at or datetime.now(),
             )
             session.add(meeting)
             session.flush()
@@ -344,6 +355,46 @@ class MeetingRepository:
             )
             summary = self._apply_user_filter(summary_query, user_id).one()
 
+            todo_summary_query = session.query(
+                func.count(TodoItem.id).label("total_todos"),
+                func.coalesce(
+                    func.sum(case((TodoItem.status == "done", 1), else_=0)),
+                    0,
+                ).label("completed_todos"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (TodoItem.status == "pending")
+                                & TodoItem.due_date.isnot(None)
+                                & (TodoItem.due_date < datetime.now()),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("overdue_todos"),
+            )
+            if user_id is not None:
+                todo_summary_query = todo_summary_query.filter(TodoItem.user_id == user_id)
+            todo_summary = todo_summary_query.one()
+
+            assignee_query = session.query(
+                func.coalesce(TodoItem.assignee, "未指定").label("key"),
+                func.count(TodoItem.id).label("count"),
+            ).filter(TodoItem.status != "cancelled")
+            if user_id is not None:
+                assignee_query = assignee_query.filter(TodoItem.user_id == user_id)
+            assignee_rows = (
+                assignee_query.group_by(func.coalesce(TodoItem.assignee, "未指定"))
+                .order_by(
+                    func.count(TodoItem.id).desc(),
+                    func.coalesce(TodoItem.assignee, "未指定").asc(),
+                )
+                .all()
+            )
+
             duration_query = (
                 session.query(
                     Meeting.duration_category.label("key"),
@@ -391,7 +442,7 @@ class MeetingRepository:
                     duration_distribution[row.key] = int(row.count)
 
             environment_distribution = {
-                key: 0 for key in ("quiet", "noisy", "multi_speaker")
+                key: 0 for key in ("quiet", "noisy", "multi_speaker", "unknown")
             }
             for row in environment_rows:
                 if row.key:
@@ -409,6 +460,12 @@ class MeetingRepository:
                 "medium_meetings": int(summary.medium_meetings or 0),
                 "long_meetings": int(summary.long_meetings or 0),
                 "multi_speaker_meetings": int(summary.multi_speaker_meetings or 0),
+                "total_todos": int(todo_summary.total_todos or 0),
+                "completed_todos": int(todo_summary.completed_todos or 0),
+                "overdue_todos": int(todo_summary.overdue_todos or 0),
+                "todo_assignee_distribution": [
+                    {"key": row.key, "count": int(row.count)} for row in assignee_rows
+                ],
                 "duration_distribution": duration_distribution,
                 "environment_distribution": environment_distribution,
                 "monthly_trend": monthly_trend,
@@ -503,7 +560,12 @@ class MeetingRepository:
                 if value:
                     query = query.filter(Meeting.duration_category == value)
             if env_filter and env_filter != "全部":
-                mapping = {"安静": "quiet", "嘈杂": "noisy", "多人": "multi_speaker"}
+                mapping = {
+                    "安静": "quiet",
+                    "嘈杂": "noisy",
+                    "多人": "multi_speaker",
+                    "未知": "unknown",
+                }
                 value = mapping.get(env_filter)
                 if value:
                     query = query.filter(Meeting.environment == value)
