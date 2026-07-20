@@ -4,7 +4,7 @@ import { createContext, ReactNode, useContext, useEffect, useState } from "react
 import { usePathname, useRouter } from "next/navigation";
 
 import { CurrentUser } from "@/types/api";
-import { clearAuthTokens, getAccessTokenClient, isAuthPath, setAuthTokens } from "@/lib/auth";
+import { clearAuthTokens, isAuthPath, setAuthTokens } from "@/lib/auth";
 import { getCurrentUser, loginUser, logoutUser, registerUser } from "@/lib/api";
 
 type AuthContextValue = {
@@ -31,16 +31,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function refreshUser() {
-    const token = getAccessTokenClient();
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      if (pathname && !isAuthPath(pathname)) {
-        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-      }
-      return;
-    }
-
     setLoading(true);
     try {
       const nextUser = await getCurrentUser();
@@ -51,9 +41,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       clearAuthTokens();
       setUser(null);
-      if (pathname && !isAuthPath(pathname)) {
-        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-      }
     } finally {
       setLoading(false);
     }
@@ -90,8 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout API errors; local session cleanup is sufficient.
     } finally {
       clearAuthTokens();
-      setUser(null);
-      router.replace("/login");
+      await refreshUser();
+      router.replace("/");
     }
   }
 

@@ -46,9 +46,15 @@ class MeetingRepository:
 
     @staticmethod
     def _apply_user_filter(query, user_id):
-        if user_id is None:
+        if user_id is None or config.SINGLE_ACCOUNT_MODE:
             return query
         return query.filter(Meeting.user_id == user_id)
+
+    @staticmethod
+    def _apply_owner_filter(query, column, user_id):
+        if user_id is None or config.SINGLE_ACCOUNT_MODE:
+            return query
+        return query.filter(column == user_id)
 
     def _ensure_default_user(self, session) -> User:
         user = session.query(User).filter_by(username=config.DEFAULT_ADMIN_USERNAME).first()
@@ -158,12 +164,9 @@ class MeetingRepository:
 
     def list_meeting_ids_for_user(self, user_id):
         with self._read_session() as session:
-            rows = (
-                session.query(Meeting.id)
-                .filter(Meeting.user_id == user_id)
-                .order_by(Meeting.created_at.desc())
-                .all()
-            )
+            query = session.query(Meeting.id)
+            query = self._apply_user_filter(query, user_id)
+            rows = query.order_by(Meeting.created_at.desc()).all()
             return [row.id for row in rows]
 
     def create_meeting(
@@ -242,7 +245,7 @@ class MeetingRepository:
                 }
             )
         with self._write_session() as session:
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 meeting = (
                     session.query(Meeting.id)
                     .filter(Meeting.id == meeting_id, Meeting.user_id == user_id)
@@ -255,7 +258,7 @@ class MeetingRepository:
     def replace_transcriptions(self, meeting_id, segments, user_id=None):
         with self._write_session() as session:
             query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 query = query.filter(Meeting.user_id == user_id)
             if not query.first():
                 return
@@ -357,7 +360,7 @@ class MeetingRepository:
                     0,
                 ).label("overdue_todos"),
             )
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 todo_summary_query = todo_summary_query.filter(TodoItem.user_id == user_id)
             todo_summary = todo_summary_query.one()
 
@@ -365,7 +368,7 @@ class MeetingRepository:
                 func.coalesce(TodoItem.assignee, "未指定").label("key"),
                 func.count(TodoItem.id).label("count"),
             ).filter(TodoItem.status != "cancelled")
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 assignee_query = assignee_query.filter(TodoItem.user_id == user_id)
             assignee_rows = (
                 assignee_query.group_by(func.coalesce(TodoItem.assignee, "未指定"))
@@ -484,7 +487,7 @@ class MeetingRepository:
                 select_fields.insert(1, "user_id")
             sql = f"SELECT {', '.join(select_fields)} FROM meetings"
             params = {}
-            if user_id is not None and "user_id" in cols:
+            if user_id is not None and "user_id" in cols and not config.SINGLE_ACCOUNT_MODE:
                 sql += " WHERE user_id = :user_id"
                 params["user_id"] = user_id
             sql += " ORDER BY created_at DESC"
@@ -574,22 +577,22 @@ class MeetingRepository:
 
     def list_contacts(self, user_id: int):
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(Contact)
                 .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
-                .filter(Contact.user_id == user_id)
-                .order_by(Contact.name.asc(), Contact.id.asc())
-                .all()
             )
+            query = self._apply_owner_filter(query, Contact.user_id, user_id)
+            return query.order_by(Contact.name.asc(), Contact.id.asc()).all()
 
     def get_contact(self, contact_id: int, user_id: int):
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(Contact)
                 .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
-                .filter(Contact.id == contact_id, Contact.user_id == user_id)
-                .first()
+                .filter(Contact.id == contact_id)
             )
+            query = self._apply_owner_filter(query, Contact.user_id, user_id)
+            return query.first()
 
     def create_contact(
         self,
@@ -610,22 +613,18 @@ class MeetingRepository:
             session.add(contact)
             session.flush()
             if group_ids:
-                groups = (
-                    session.query(ContactGroup)
-                    .filter(
-                        ContactGroup.user_id == user_id,
-                        ContactGroup.id.in_(group_ids),
-                    )
-                    .all()
-                )
+                group_query = session.query(ContactGroup).filter(ContactGroup.id.in_(group_ids))
+                group_query = self._apply_owner_filter(group_query, ContactGroup.user_id, user_id)
+                groups = group_query.all()
                 contact.groups = groups
             session.flush()
-            return (
+            query = (
                 session.query(Contact)
                 .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
-                .filter(Contact.id == contact.id, Contact.user_id == user_id)
-                .first()
+                .filter(Contact.id == contact.id)
             )
+            query = self._apply_owner_filter(query, Contact.user_id, user_id)
+            return query.first()
 
     def update_contact(
         self,
@@ -638,12 +637,13 @@ class MeetingRepository:
         group_ids: list[int] | None = None,
     ):
         with self._write_session() as session:
-            contact = (
+            contact_query = (
                 session.query(Contact)
                 .options(joinedload(Contact.groups))
-                .filter(Contact.id == contact_id, Contact.user_id == user_id)
-                .first()
+                .filter(Contact.id == contact_id)
             )
+            contact_query = self._apply_owner_filter(contact_query, Contact.user_id, user_id)
+            contact = contact_query.first()
             if not contact:
                 return None
 
@@ -652,30 +652,24 @@ class MeetingRepository:
             contact.note = note
             groups = []
             if group_ids:
-                groups = (
-                    session.query(ContactGroup)
-                    .filter(
-                        ContactGroup.user_id == user_id,
-                        ContactGroup.id.in_(group_ids),
-                    )
-                    .all()
-                )
+                group_query = session.query(ContactGroup).filter(ContactGroup.id.in_(group_ids))
+                group_query = self._apply_owner_filter(group_query, ContactGroup.user_id, user_id)
+                groups = group_query.all()
             contact.groups = groups
             session.flush()
-            return (
+            query = (
                 session.query(Contact)
                 .options(joinedload(Contact.groups).joinedload(ContactGroup.contacts))
-                .filter(Contact.id == contact.id, Contact.user_id == user_id)
-                .first()
+                .filter(Contact.id == contact.id)
             )
+            query = self._apply_owner_filter(query, Contact.user_id, user_id)
+            return query.first()
 
     def delete_contact(self, user_id: int, contact_id: int) -> bool:
         with self._write_session() as session:
-            contact = (
-                session.query(Contact)
-                .filter(Contact.id == contact_id, Contact.user_id == user_id)
-                .first()
-            )
+            query = session.query(Contact).filter(Contact.id == contact_id)
+            query = self._apply_owner_filter(query, Contact.user_id, user_id)
+            contact = query.first()
             if not contact:
                 return False
             session.delete(contact)
@@ -683,22 +677,22 @@ class MeetingRepository:
 
     def list_contact_groups(self, user_id: int):
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(ContactGroup)
                 .options(joinedload(ContactGroup.contacts))
-                .filter(ContactGroup.user_id == user_id)
-                .order_by(ContactGroup.group_name.asc(), ContactGroup.id.asc())
-                .all()
             )
+            query = self._apply_owner_filter(query, ContactGroup.user_id, user_id)
+            return query.order_by(ContactGroup.group_name.asc(), ContactGroup.id.asc()).all()
 
     def get_contact_group(self, group_id: int, user_id: int):
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(ContactGroup)
                 .options(joinedload(ContactGroup.contacts))
-                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
-                .first()
+                .filter(ContactGroup.id == group_id)
             )
+            query = self._apply_owner_filter(query, ContactGroup.user_id, user_id)
+            return query.first()
 
     def create_contact_group(
         self,
@@ -715,11 +709,9 @@ class MeetingRepository:
             session.add(group)
             session.flush()
             if member_ids:
-                members = (
-                    session.query(Contact)
-                    .filter(Contact.user_id == user_id, Contact.id.in_(member_ids))
-                    .all()
-                )
+                member_query = session.query(Contact).filter(Contact.id.in_(member_ids))
+                member_query = self._apply_owner_filter(member_query, Contact.user_id, user_id)
+                members = member_query.all()
                 group.contacts = members
             session.refresh(group)
             return group
@@ -733,23 +725,22 @@ class MeetingRepository:
         member_ids: list[int] | None = None,
     ):
         with self._write_session() as session:
-            group = (
+            group_query = (
                 session.query(ContactGroup)
                 .options(joinedload(ContactGroup.contacts))
-                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
-                .first()
+                .filter(ContactGroup.id == group_id)
             )
+            group_query = self._apply_owner_filter(group_query, ContactGroup.user_id, user_id)
+            group = group_query.first()
             if not group:
                 return None
 
             group.group_name = group_name
             members = []
             if member_ids:
-                members = (
-                    session.query(Contact)
-                    .filter(Contact.user_id == user_id, Contact.id.in_(member_ids))
-                    .all()
-                )
+                member_query = session.query(Contact).filter(Contact.id.in_(member_ids))
+                member_query = self._apply_owner_filter(member_query, Contact.user_id, user_id)
+                members = member_query.all()
             group.contacts = members
             session.flush()
             session.refresh(group)
@@ -757,11 +748,9 @@ class MeetingRepository:
 
     def delete_contact_group(self, user_id: int, group_id: int) -> bool:
         with self._write_session() as session:
-            group = (
-                session.query(ContactGroup)
-                .filter(ContactGroup.id == group_id, ContactGroup.user_id == user_id)
-                .first()
-            )
+            query = session.query(ContactGroup).filter(ContactGroup.id == group_id)
+            query = self._apply_owner_filter(query, ContactGroup.user_id, user_id)
+            group = query.first()
             if not group:
                 return False
             session.delete(group)
@@ -780,7 +769,7 @@ class MeetingRepository:
     ):
         with self._write_session() as session:
             meeting_query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 meeting_query = meeting_query.filter(Meeting.user_id == user_id)
             if not meeting_query.first():
                 return None
@@ -803,6 +792,6 @@ class MeetingRepository:
                 .join(Meeting, Meeting.id == EmailLog.meeting_id)
                 .filter(EmailLog.meeting_id == meeting_id)
             )
-            if user_id is not None:
+            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
                 query = query.filter(Meeting.user_id == user_id)
             return query.order_by(EmailLog.sent_at.desc(), EmailLog.id.desc()).all()

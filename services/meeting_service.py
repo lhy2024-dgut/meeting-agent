@@ -1,10 +1,5 @@
-﻿import json
 import re
 import time
-from pathlib import Path
-
-import yaml
-
 from chains.export_chain import ExportChain
 from chains.minutes_chain import (
     MinutesChain,
@@ -18,7 +13,6 @@ from engines.asr_engine import (
     _get_audio_duration,
     get_asr_engine,
 )
-from engines.llm import get_llm
 from logger import get_logger
 from rag.retriever import get_retriever
 from services.terms_service import save_terms
@@ -361,7 +355,7 @@ class MeetingService:
 
         if progress_callback:
             progress_callback(72, "📝 生成摘要...")
-        short_summary, project_name = self._generate_summary(transcript, minutes)
+        short_summary, project_name = self._generate_summary(transcript, minutes, title=title)
 
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
@@ -423,43 +417,52 @@ class MeetingService:
         }
 
     @staticmethod
-    def _generate_summary(transcript, minutes):
-        """调用 LLM 生成 short_summary 和 project_name，失败时回退。"""
-        try:
-            template_path = (
-                Path(__file__).resolve().parent.parent
-                / "prompts"
-                / "templates"
-                / "auto_summary.yaml"
-            )
-            with open(template_path, "r", encoding="utf-8") as file:
-                template = yaml.safe_load(file)
-            system_prompt = template["system"].format(
-                transcript=(transcript or "")[:3000],
-                minutes=(minutes or "")[:1000],
-            )
-        except Exception as exc:
-            logger.warning("加载 auto_summary 模板失败: %s", exc)
-            return (minutes or "")[:200], "未分类"
-        try:
-            llm = get_llm(temperature=0.1)
-            response = llm.invoke(system_prompt)
-            text = response.content if hasattr(response, "content") else str(response)
-        except Exception as exc:
-            logger.warning("摘要 LLM 调用失败: %s", exc)
-            return (minutes or "")[:200], "未分类"
+    def _generate_summary(transcript, minutes, title=""):
+        """从已生成纪要本地派生列表摘要，避免额外 LLM 调用拖慢主流程。"""
+        project_name = MeetingService._derive_project_name(minutes, title)
+        short_summary = MeetingService._derive_short_summary(minutes, transcript)
+        return short_summary, project_name
 
-        try:
-            text = text.strip()
-            text = re.sub(r"^```(?:json)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-            data = json.loads(text)
-            project_name = str(data.get("project_name", "未分类"))[:20]
-            short_summary = str(data.get("short_summary", ""))[:200]
-            return short_summary, project_name
-        except (json.JSONDecodeError, TypeError, KeyError) as exc:
-            logger.warning("摘要 JSON 解析失败: %s, raw=%s", exc, text[:100])
-            return (minutes or "")[:200], "未分类"
+    @staticmethod
+    def _clean_summary_line(value: str) -> str:
+        text = re.sub(r"^#{1,6}\s*", "", value or "")
+        text = re.sub(r"^[-*]\s*(?:\[[ xX]\]\s*)?", "", text)
+        text = re.sub(r"^\d+[\.)、]\s*", "", text)
+        text = re.sub(r"[*_`>]+", "", text)
+        return re.sub(r"\s+", " ", text).strip(" -:：;；")
+
+    @staticmethod
+    def _derive_project_name(minutes: str, title: str = "") -> str:
+        title = (title or "").strip()
+        if title:
+            return title[:20]
+
+        skipped_keywords = ("会议纪要", "日期", "会议主题")
+        for raw_line in (minutes or "").splitlines():
+            line = MeetingService._clean_summary_line(raw_line)
+            if not line or any(keyword in line for keyword in skipped_keywords):
+                continue
+            return line[:20]
+        return "未分类"
+
+    @staticmethod
+    def _derive_short_summary(minutes: str, transcript: str = "") -> str:
+        lines: list[str] = []
+        skipped_keywords = ("会议纪要", "日期")
+        for raw_line in (minutes or "").splitlines():
+            line = MeetingService._clean_summary_line(raw_line)
+            if not line or any(keyword in line for keyword in skipped_keywords):
+                continue
+            lines.append(line)
+            if len("；".join(lines)) >= 160 or len(lines) >= 3:
+                break
+
+        summary = "；".join(lines).strip()
+        if not summary:
+            summary = re.sub(r"\s+", " ", transcript or "").strip()
+        if not summary:
+            summary = "暂无摘要"
+        return summary[:200]
 
     @staticmethod
     def _classify_without_diarization(duration: float) -> tuple[str, str]:

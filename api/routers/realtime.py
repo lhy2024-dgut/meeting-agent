@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import config
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.deps import get_current_user
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/realtime", tags=["realtime"])
 
 def _get_owned_session(session_id: str, user_id: int):
     session = realtime_session_manager.get_session(session_id)
-    if not session or session.user_id != user_id:
+    if not session or (not config.SINGLE_ACCOUNT_MODE and session.user_id != user_id):
         raise HTTPException(status_code=404, detail="Realtime session not found")
     return session
 
@@ -124,7 +125,7 @@ def delete_realtime_session(
     session = realtime_session_manager.get_session(session_id)
     if not session:
         return RealtimeSessionMutationResponse(success=True)
-    if session.user_id != current_user.id:
+    if not config.SINGLE_ACCOUNT_MODE and session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Realtime session not found")
 
     cleaned = realtime_session_manager.cleanup_session(session_id)

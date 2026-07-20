@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import re
 
+import config
 from sqlalchemy.orm import selectinload
 
 from db.models import Meeting, TodoItem, TodoStatusLog
@@ -137,6 +138,12 @@ class TodoService:
         finally:
             session.close()
 
+    @staticmethod
+    def _apply_user_filter(query, column, user_id: int):
+        if config.SINGLE_ACCOUNT_MODE:
+            return query
+        return query.filter(column == user_id)
+
     def list_todos(
         self,
         user_id: int,
@@ -150,8 +157,8 @@ class TodoService:
             query = (
                 session.query(TodoItem)
                 .options(selectinload(TodoItem.status_logs))
-                .filter(TodoItem.user_id == user_id)
             )
+            query = self._apply_user_filter(query, TodoItem.user_id, user_id)
             if meeting_id is not None:
                 query = query.filter(TodoItem.meeting_id == meeting_id)
             if status:
@@ -166,12 +173,13 @@ class TodoService:
 
     def get_todo(self, user_id: int, todo_id: int) -> TodoItem | None:
         with self._read_session() as session:
-            return (
+            query = (
                 session.query(TodoItem)
                 .options(selectinload(TodoItem.status_logs))
-                .filter(TodoItem.id == todo_id, TodoItem.user_id == user_id)
-                .first()
+                .filter(TodoItem.id == todo_id)
             )
+            query = self._apply_user_filter(query, TodoItem.user_id, user_id)
+            return query.first()
 
     def create_todo(
         self,
@@ -188,11 +196,9 @@ class TodoService:
             raise TodoTransitionError("Todo content is required")
 
         with self._write_session() as session:
-            meeting = (
-                session.query(Meeting)
-                .filter(Meeting.id == meeting_id, Meeting.user_id == user_id)
-                .first()
-            )
+            meeting_query = session.query(Meeting).filter(Meeting.id == meeting_id)
+            meeting_query = self._apply_user_filter(meeting_query, Meeting.user_id, user_id)
+            meeting = meeting_query.first()
             if not meeting:
                 raise TodoTransitionError("Meeting not found")
 
@@ -237,11 +243,9 @@ class TodoService:
         priority: str | None = None,
     ) -> TodoItem:
         with self._write_session() as session:
-            todo = (
-                session.query(TodoItem)
-                .filter(TodoItem.id == todo_id, TodoItem.user_id == user_id)
-                .first()
-            )
+            todo_query = session.query(TodoItem).filter(TodoItem.id == todo_id)
+            todo_query = self._apply_user_filter(todo_query, TodoItem.user_id, user_id)
+            todo = todo_query.first()
             if not todo:
                 raise TodoTransitionError("Todo not found")
 
@@ -278,11 +282,9 @@ class TodoService:
     ) -> TodoItem:
         next_status = normalize_status(to_status)
         with self._write_session() as session:
-            todo = (
-                session.query(TodoItem)
-                .filter(TodoItem.id == todo_id, TodoItem.user_id == user_id)
-                .first()
-            )
+            todo_query = session.query(TodoItem).filter(TodoItem.id == todo_id)
+            todo_query = self._apply_user_filter(todo_query, TodoItem.user_id, user_id)
+            todo = todo_query.first()
             if not todo:
                 raise TodoTransitionError("Todo not found")
 
@@ -332,20 +334,15 @@ class TodoService:
     ) -> list[TodoItem]:
         parsed_items = parse_action_items_text(action_items_text)
         with self._write_session() as session:
-            meeting = (
-                session.query(Meeting)
-                .filter(Meeting.id == meeting_id, Meeting.user_id == user_id)
-                .first()
-            )
+            meeting_query = session.query(Meeting).filter(Meeting.id == meeting_id)
+            meeting_query = self._apply_user_filter(meeting_query, Meeting.user_id, user_id)
+            meeting = meeting_query.first()
             if not meeting:
                 raise TodoTransitionError("Meeting not found")
 
-            existing = (
-                session.query(TodoItem)
-                .filter(TodoItem.meeting_id == meeting_id, TodoItem.user_id == user_id)
-                .order_by(TodoItem.id.asc())
-                .all()
-            )
+            existing_query = session.query(TodoItem).filter(TodoItem.meeting_id == meeting_id)
+            existing_query = self._apply_user_filter(existing_query, TodoItem.user_id, user_id)
+            existing = existing_query.order_by(TodoItem.id.asc()).all()
             if existing and not replace:
                 return existing
 
