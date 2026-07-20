@@ -4,7 +4,7 @@ from datetime import datetime
 import bcrypt
 import config
 from sqlalchemy import case, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, lazyload
 
 from db.engine import get_engine, get_session_factory
 from db.models import Contact, ContactGroup, EmailLog, Meeting, TodoItem, Transcription, User
@@ -21,8 +21,9 @@ class MeetingRepository:
     """会议数据仓库，支持依赖注入覆盖数据库连接。"""
 
     def __init__(self, db_url=None):
-        self.engine = get_engine(url=db_url) if db_url else get_engine()
-        self.Session = get_session_factory(engine=self.engine)
+        # db_url 为 None 时复用全局单例引擎，避免每次实例化都创建新连接池
+        self.engine = get_engine(url=db_url)
+        self.Session = get_session_factory(engine=self.engine if db_url else None)
 
     @contextmanager
     def _write_session(self):
@@ -84,21 +85,39 @@ class MeetingRepository:
             return user
 
     def get_user_by_id(self, user_id):
+        # lazyload('*') 覆盖 User 关系的 selectin 急加载：鉴权只需标量字段，
+        # 避免每次请求都级联加载该用户全部会议/转录/待办/邮件记录（导致请求变慢、连接池耗尽）。
         with self._read_session() as session:
-            return session.query(User).filter_by(id=user_id).first()
+            return (
+                session.query(User)
+                .options(lazyload("*"))
+                .filter_by(id=user_id)
+                .first()
+            )
 
     def get_user_by_username(self, username):
         with self._read_session() as session:
-            return session.query(User).filter_by(username=username).first()
+            return (
+                session.query(User)
+                .options(lazyload("*"))
+                .filter_by(username=username)
+                .first()
+            )
 
     def get_user_by_email(self, email):
         with self._read_session() as session:
-            return session.query(User).filter_by(email=email).first()
+            return (
+                session.query(User)
+                .options(lazyload("*"))
+                .filter_by(email=email)
+                .first()
+            )
 
     def get_user_by_login(self, login):
         with self._read_session() as session:
             return (
                 session.query(User)
+                .options(lazyload("*"))
                 .filter(or_(User.username == login, User.email == login))
                 .first()
             )

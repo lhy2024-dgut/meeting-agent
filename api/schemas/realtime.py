@@ -35,6 +35,8 @@ class RealtimeSessionResponse(BaseModel):
     transcript: str
     duration_seconds: float
     chunk_count: int
+    dropped_chunk_count: int = 0            # 解码连续失败被跳过的分片数（录音缺该段）
+    transcription_failed_count: int = 0     # 转写失败但录音保留的分片数（文字缺该段）
     segments: list[RealtimeSegment]
     speaker_segments: list[RealtimeSegment]
     created_at: datetime

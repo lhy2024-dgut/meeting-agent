@@ -41,8 +41,8 @@ _FFMPEG = _find_exe("ffmpeg")
 _FFPROBE = _find_exe("ffprobe")
 logger.info("ffmpeg: %s  ffprobe: %s", _FFMPEG, _FFPROBE)
 
-_PARALLEL_MIN_SEC = 90
-_MAX_CHUNK_SEC = 60
+_PARALLEL_MIN_SEC = 60
+_MAX_CHUNK_SEC = 45
 _MIN_SILENCE_MS = 500
 _SILENCE_THRESH_DB = -40
 _MAX_WORKERS = 4
@@ -139,20 +139,41 @@ def _detect_silence_ffmpeg(audio_path: str, min_silence_ms: int, thresh_db: int)
 
 
 def _split_audio_ffmpeg(audio_path: str, duration_s: float) -> tuple:
-    """Split audio at silence boundaries into temp WAV chunks."""
+    """Split audio at silence boundaries into temp WAV chunks.
+
+    严格保证每块时长 ≤ _MAX_CHUNK_SEC：优先在静音处切割，静音间隔过长时强制按
+    _MAX_CHUNK_SEC 固定切割，防止单块过大导致 OOM。
+    """
     silences = _detect_silence_ffmpeg(audio_path, _MIN_SILENCE_MS, _SILENCE_THRESH_DB)
 
-    cut_points = [0.0]
-    for start_s, end_s in silences:
-        cut_points.append((start_s + end_s) / 2.0)
-    cut_points.append(duration_s)
+    # 收集所有候选切割点（静音中点），并追加结束时间
+    potential_cuts: list[float] = sorted(
+        {(s + e) / 2.0 for s, e in silences} | {duration_s}
+    )
 
+    # 贪心构建块：优先在静音处切，超出 _MAX_CHUNK_SEC 时强制切
     bounds: list[tuple[float, float]] = []
     chunk_start = 0.0
-    for index in range(1, len(cut_points)):
-        if cut_points[index] - chunk_start >= _MAX_CHUNK_SEC or index == len(cut_points) - 1:
-            bounds.append((chunk_start, cut_points[index]))
-            chunk_start = cut_points[index]
+    ci = 0  # 当前候选切割点游标
+
+    while chunk_start < duration_s:
+        deadline = chunk_start + _MAX_CHUNK_SEC
+
+        # 找 [chunk_start, deadline] 范围内最后一个候选切割点
+        best_cut: float | None = None
+        while ci < len(potential_cuts) and potential_cuts[ci] <= deadline:
+            if potential_cuts[ci] > chunk_start:
+                best_cut = potential_cuts[ci]
+            ci += 1
+
+        if best_cut is None:
+            # 该窗口内无静音：强制在 deadline（或 duration_s）处切割
+            cut_at = min(deadline, duration_s)
+        else:
+            cut_at = best_cut
+
+        bounds.append((chunk_start, cut_at))
+        chunk_start = cut_at
 
     if not bounds:
         bounds = [(0.0, duration_s)]

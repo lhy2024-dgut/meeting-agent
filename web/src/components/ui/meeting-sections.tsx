@@ -37,12 +37,16 @@ export function ResolutionSection({ text }: { text: string }) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
+    .filter((line) => !line.startsWith("## ") && !line.startsWith("### "))
     .map((line) =>
       line
         .replace(/^\d+[\.)、]\s*/, "")
         .replace(/^- /, "")
-        .replace(/^• /, ""),
-    );
+        .replace(/^• /, "")
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .trim(),
+    )
+    .filter(Boolean);
 
   if (items.length === 0) {
     return <div className="empty-inline">本次会议未明确决议</div>;

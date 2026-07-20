@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { ApiError, generateHtmlSummary, getHtmlSummary } from "@/lib/api";
+import { generateHtmlSummary } from "@/lib/api";
+import { requestBrowserJson } from "@/lib/browser-api";
 import { HtmlSummaryResponse } from "@/types/api";
 import { Card } from "@/components/ui/cards";
 
@@ -14,24 +15,22 @@ export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
   const [summary, setSummary] = useState<HtmlSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [includeCode, setIncludeCode] = useState(false);
-  const [includeFlowchart, setIncludeFlowchart] = useState(true);
   const [viewMode, setViewMode] = useState<"visual" | "source">("visual");
+  // 是否在可视化纪要中渲染代码块 / 流程图（原按钮已移除，使用固定默认值）
+  const includeCode = false;
+  const includeFlowchart = true;
 
   useEffect(() => {
     let active = true;
-    void getHtmlSummary(meetingId)
+    // 用 requestBrowserJson 代替 getHtmlSummary（api.ts），避免 401 触发
+    // handleUnauthorized → 清除 token → 跳转登录的死循环。
+    // 404（尚未生成）和 401（token 短暂失效）均静默处理，只展示"生成"按钮。
+    requestBrowserJson<HtmlSummaryResponse>(`/meetings/${meetingId}/html-summary`)
       .then((nextSummary) => {
-        if (active) {
-          setSummary(nextSummary);
-        }
+        if (active) setSummary(nextSummary);
       })
-      .catch((fetchError) => {
-        if (!active) return;
-        if (fetchError instanceof ApiError && fetchError.status === 404) {
-          return;
-        }
-        setError(fetchError instanceof Error ? fetchError.message : "加载可视化纪要失败");
+      .catch(() => {
+        // 404 或 401：纪要尚未生成，不弹错误
       });
     return () => {
       active = false;
@@ -73,19 +72,19 @@ export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
           <div className="text-[13px] text-[var(--text-secondary)]">{"生成一份可预览、可下载的 HTML 纪要总览。"}</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className={includeCode ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setIncludeCode((value) => !value)}>{"代码块"}</button>
-          <button className={includeFlowchart ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setIncludeFlowchart((value) => !value)}>{"流程图"}</button>
           <button className="primary-button" type="button" onClick={handleGenerate} disabled={loading}>
             {loading ? "生成中..." : "生成可视化纪要"}
           </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button className={viewMode === "visual" ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setViewMode("visual")}>{"预览"}</button>
-        <button className={viewMode === "source" ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setViewMode("source")}>{"HTML 源码"}</button>
-        {summary ? <button className="tertiary-button" type="button" onClick={handleDownload}>{"下载 HTML"}</button> : null}
-      </div>
+      {summary ? (
+        <div className="flex flex-wrap gap-2">
+          <button className={viewMode === "visual" ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setViewMode("visual")}>{"预览"}</button>
+          <button className={viewMode === "source" ? "secondary-button" : "tertiary-button"} type="button" onClick={() => setViewMode("source")}>{"HTML 源码"}</button>
+          <button className="tertiary-button" type="button" onClick={handleDownload}>{"下载 HTML"}</button>
+        </div>
+      ) : null}
 
       {error ? <div className="error-inline">{error}</div> : null}
 

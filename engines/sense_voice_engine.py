@@ -95,13 +95,19 @@ def _build_hotword(terms: list | None) -> str | None:
 
 
 def _transcribe_chunk(model, chunk_path: str, start_offset: float, hotword: str | None) -> list[dict]:
-    """转写单个音频块并返回带绝对时间戳的 segment 列表。"""
+    """转写单个音频块并返回带绝对时间戳的 segment 列表。
+
+    始终启用 merge_vad 以在块内进一步按静音分段，防止 FunASR 对整块做一次性
+    自注意力计算引发 OOM。
+    """
     gen_kwargs = dict(
         input=chunk_path,
         cache={},
         language="zh",
         use_itn=True,
         batch_size_s=60,
+        merge_vad=True,
+        merge_length_s=15,
     )
     if hotword:
         try:
@@ -144,7 +150,7 @@ def _transcribe_chunk(model, chunk_path: str, start_offset: float, hotword: str 
 class SenseVoiceEngine:
     """FunASR SenseVoiceSmall 引擎，接口与 ASREngine 兼容。"""
 
-    _DIRECT_MAX_SEC = 120
+    _DIRECT_MAX_SEC = 60  # 超过此时长强制分块，防止 OOM
 
     def __init__(self):
         self._model = None
@@ -159,7 +165,9 @@ class SenseVoiceEngine:
         from engines.asr_engine import _PARALLEL_MIN_SEC, _get_audio_duration, _split_audio_ffmpeg
 
         hotword = _build_hotword(terms)
-        total_duration = _get_audio_duration(audio_path) or _PARALLEL_MIN_SEC
+        raw_duration = _get_audio_duration(audio_path)
+        # 当 ffprobe 无法获取时长时（返回 0），保守地假设音频较长并强制分块
+        total_duration = raw_duration if raw_duration > 0 else _PARALLEL_MIN_SEC + 1
 
         if total_duration > self._DIRECT_MAX_SEC:
             logger.info(

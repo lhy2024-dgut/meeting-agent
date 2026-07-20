@@ -25,6 +25,34 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
+# 短名 → ModelScope 缓存子目录（iic/xxx）的映射表（与 week5 保持一致，优先用本地缓存）
+_MODEL_ALIASES: dict[str, str] = {
+    "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online":
+        "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "paraformer-zh-streaming":
+        "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "ct-punc":
+        "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+    "fsmn-vad":
+        "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "cam++":
+        "iic/speech_campplus_sv_zh-cn_16k-common",
+    "paraformer-zh":
+        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+}
+
+
+def _local_model(name: str) -> str:
+    """若本地缓存存在则返回绝对路径，否则原样返回 name（触发在线下载）。"""
+    subdir = _MODEL_ALIASES.get(name, name)
+    local = config.FUNASR_MODEL_DIR / subdir
+    if local.exists():
+        logger.debug("使用本地模型: %s", local)
+        return str(local)
+    logger.warning("本地未找到模型 %s（路径: %s），将尝试在线下载", name, local)
+    return name
+
+
 SAMPLE_RATE = 16000        # Hz，FunASR 要求 16 kHz
 SD_BLOCK_SAMPLES = 1024    # sounddevice 回调粒度（约 64ms）
 CHUNK_STRIDE = 10 * 960    # 9 600 samples = 600ms，paraformer-zh-streaming 标准步长
@@ -43,6 +71,7 @@ class RealtimeASRService:
         self._running = False
         self._error: Optional[str] = None   # 后台线程异常消息；None 表示正常
         self._lock = threading.Lock()
+        self._init_lock = threading.Lock()  # 防止预加载线程与首个分片并发重复加载模型
         self._accumulated_text: str = ""
         self._audio_buffer: list[np.ndarray] = []
         self._record_thread: Optional[threading.Thread] = None
@@ -54,36 +83,32 @@ class RealtimeASRService:
     def _init_asr(self):
         if self._asr_model is not None:
             return
-        logger.info("加载 FunASR paraformer-zh-streaming（首次需下载模型）...")
-        try:
+        with self._init_lock:
+            if self._asr_model is not None:  # 双重检查，避免并发重复加载
+                return
             from funasr import AutoModel
-            for kwargs in [
-                {"model": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online"},
-                {"model": "paraformer-zh-streaming", "model_revision": "v2.0.4"},
-                {"model": "paraformer-zh-streaming", "hub": "hf"},
-            ]:
-                try:
-                    self._asr_model = AutoModel(disable_update=True, **kwargs)
-                    logger.info("FunASR 加载完成（%s）", kwargs["model"])
-                    return
-                except Exception as exc:
-                    logger.warning("FunASR 来源 %s 失败: %s", kwargs.get("model"), exc)
-            raise RuntimeError("所有 FunASR 模型来源均失败，请检查网络或手动下载模型。")
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"FunASR 加载失败: {exc}") from exc
+            model_path = _local_model("iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online")
+            logger.info("加载 FunASR paraformer-zh-streaming: %s", model_path)
+            try:
+                self._asr_model = AutoModel(model=model_path, disable_update=True)
+                logger.info("FunASR 流式 ASR 加载完成")
+            except Exception as exc:
+                raise RuntimeError(f"FunASR 加载失败: {exc}") from exc
 
     def _init_punc_model(self):
         if self._punc_model is not None:
             return
-        logger.info("加载 ct-punc 标点模型...")
-        try:
+        with self._init_lock:
+            if self._punc_model is not None:  # 双重检查，避免并发重复加载
+                return
             from funasr import AutoModel
-            self._punc_model = AutoModel(model="ct-punc", disable_update=True)
-            logger.info("ct-punc 加载完成")
-        except Exception as exc:
-            logger.warning("ct-punc 加载失败，将跳过标点恢复: %s", exc)
+            model_path = _local_model("ct-punc")
+            logger.info("加载 ct-punc 标点模型: %s", model_path)
+            try:
+                self._punc_model = AutoModel(model=model_path, disable_update=True)
+                logger.info("ct-punc 加载完成")
+            except Exception as exc:
+                logger.warning("ct-punc 加载失败，将跳过标点恢复: %s", exc)
 
     def initialize(self):
         """预加载流式 ASR 模型（首次耗时约 30–60s）。"""
@@ -98,10 +123,10 @@ class RealtimeASRService:
         try:
             from funasr import AutoModel
             self._spk_model = AutoModel(
-                model="paraformer-zh",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
-                spk_model="cam++",
+                model=_local_model("paraformer-zh"),
+                vad_model=_local_model("fsmn-vad"),
+                punc_model=_local_model("ct-punc"),
+                spk_model=_local_model("cam++"),
                 disable_update=True,
             )
             logger.info("说话人识别模型加载完成")
@@ -308,6 +333,69 @@ class RealtimeASRService:
         except Exception as exc:
             logger.debug("FunASR %s: %s", "final" if is_final else "chunk", exc)
         return ""
+
+    # ── Web 流式接口（由浏览器上传的分片 PCM 驱动，非 sounddevice）──────────────
+    # 与 week5 的流式实现共用同一个 paraformer-zh-streaming 模型和 _infer 逻辑，
+    # 区别仅在于音频来源：Web 端把每个上传分片的 PCM 喂进来，跨分片共享同一 cache。
+
+    def ensure_streaming_ready(self) -> None:
+        """确保流式模型已加载（Web 会话在首个分片到达时调用）。"""
+        self._init_asr()
+
+    def ensure_punctuation_ready(self) -> None:
+        """确保标点模型已加载（会话创建时后台预加载，避免停止录音时才加载导致超时）。"""
+        self._init_punc_model()
+
+    def create_stream_state(self) -> dict:
+        """为单个 Web 实时会话创建独立的流式状态：共享 cache + 未凑满一步的零头缓冲。"""
+        return {"cache": {}, "remainder": np.array([], dtype=np.float32)}
+
+    def feed_stream_pcm(self, state: dict, pcm: np.ndarray) -> str:
+        """把一段 PCM（float32, 16kHz, 单声道）喂入流式模型，返回本次新增文字。
+
+        自动按 CHUNK_STRIDE(600ms) 切窗推理；不足一窗的零头留在 state 中等下次。
+        """
+        self._init_asr()
+        buf = state.get("remainder")
+        if buf is None or len(buf) == 0:
+            buf = pcm.astype(np.float32)
+        elif pcm is not None and len(pcm) > 0:
+            buf = np.concatenate([buf, pcm.astype(np.float32)])
+
+        parts: list[str] = []
+        while len(buf) >= CHUNK_STRIDE:
+            window = buf[:CHUNK_STRIDE]
+            buf = buf[CHUNK_STRIDE:]
+            text = self._infer(window, state["cache"], is_final=False)
+            if text:
+                parts.append(text)
+        state["remainder"] = buf
+        return "".join(parts)
+
+    def finalize_stream(self, state: dict) -> str:
+        """会话停止时刷出尾音（is_final=True），返回尾部新增文字。"""
+        self._init_asr()
+        buf = state.get("remainder")
+        if buf is None:
+            buf = np.array([], dtype=np.float32)
+        text = self._infer(buf, state["cache"], is_final=True)
+        state["remainder"] = np.array([], dtype=np.float32)
+        return text or ""
+
+    def apply_punctuation_text(self, text: str) -> str:
+        """对完整文本做一次性标点恢复（复用 ct-punc），失败时原样返回。"""
+        if not text or not text.strip():
+            return text
+        try:
+            self._init_punc_model()
+            if self._punc_model is None:
+                return text
+            res = self._punc_model.generate(input=text)
+            if res and res[0].get("text"):
+                return res[0]["text"].strip()
+        except Exception as exc:
+            logger.warning("标点恢复失败，保留原文: %s", exc)
+        return text
 
     # ── 音频保存 ──────────────────────────────────────────────────────────────
 
