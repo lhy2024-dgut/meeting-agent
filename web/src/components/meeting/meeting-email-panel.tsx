@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { requestBrowserJson } from "@/lib/browser-api";
 import { Contact, ContactGroup, EmailLog, MeetingEmailSendResponse } from "@/types/api";
@@ -33,10 +33,6 @@ export function MeetingEmailPanel({
   const [documentFormat, setDocumentFormat] = useState("docx");
   const [attachHtmlSummary, setAttachHtmlSummary] = useState(false);
 
-  useEffect(() => {
-    void loadData();
-  }, [meetingId]);
-
   const recipients = useMemo(() => {
     if (recipientMode === "contacts") {
       return Array.from(
@@ -57,7 +53,7 @@ export function MeetingEmailPanel({
     );
   }, [contacts, groups, recipientMode, selectedContactIds, selectedGroupIds]);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -72,7 +68,14 @@ export function MeetingEmailPanel({
     } finally {
       setLoading(false);
     }
-  }
+  }, [meetingId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
 
   async function handleSend() {
     if (!subject.trim()) {

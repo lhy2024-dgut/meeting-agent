@@ -1,5 +1,6 @@
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -23,6 +24,7 @@ class User(Base):
     username = Column(String(64), nullable=False, unique=True, index=True)
     email = Column(String(255), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
     display_name = Column(String(255))
     created_at = Column(DateTime)
     last_login_at = Column(DateTime)
@@ -227,6 +229,8 @@ class TodoItem(Base):
     due_date = Column(DateTime)
     status = Column(String(32), nullable=False, default="pending")
     priority = Column(String(32), nullable=False, default="medium")
+    source = Column(String(32), nullable=False, default="meeting_pipeline")
+    is_user_modified = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { createChatSession, sendChatMessage } from "@/lib/api";
+import { ApiError, createChatSession, sendChatMessage } from "@/lib/api";
 import { ChatMemoryStats, RagResultItem } from "@/types/api";
 
 export type ChatMode = "single" | "cross";
@@ -16,6 +16,7 @@ export type ChatMessage = {
 type UseChatSessionOptions = {
   mode: ChatMode;
   meetingId?: number | null;
+  userId?: number | null;
   enabled?: boolean;
   initialAssistantMessage?: string;
   onBeforeBootstrap?: () => void;
@@ -25,9 +26,29 @@ type UseChatSessionOptions = {
 
 const DEFAULT_MAX_INPUT_LENGTH = 500;
 
+type PersistedChatSession = {
+  sessionId: string;
+  messages: ChatMessage[];
+  memory: ChatMemoryStats | null;
+};
+
+function readPersistedSession(key: string): PersistedChatSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedChatSession;
+    if (!parsed.sessionId || !Array.isArray(parsed.messages)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function useChatSession({
   mode,
   meetingId,
+  userId,
   enabled = true,
   initialAssistantMessage,
   onBeforeBootstrap,
@@ -42,6 +63,9 @@ export function useChatSession({
   const [memory, setMemory] = useState<ChatMemoryStats | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const bootstrapRef = useRef(0);
+  const restoredKeyRef = useRef<string | null>(null);
+  const activeStorageKeyRef = useRef<string | null>(null);
+  const storageKey = `meeting-agent-chat:${userId ?? "anonymous"}:${mode}:${meetingId ?? "all"}`;
 
   useEffect(() => {
     if (!enabled) {
@@ -50,10 +74,34 @@ export function useChatSession({
     if (mode === "single" && !meetingId) {
       return;
     }
+    if (!userId) {
+      return;
+    }
 
     const currentBootstrap = bootstrapRef.current + 1;
     bootstrapRef.current = currentBootstrap;
     let active = true;
+
+    if (restoredKeyRef.current !== storageKey) {
+      restoredKeyRef.current = storageKey;
+      activeStorageKeyRef.current = null;
+      const persisted = readPersistedSession(storageKey);
+      if (persisted) {
+        activeStorageKeyRef.current = storageKey;
+        const timer = window.setTimeout(() => {
+          if (!active) return;
+          setSessionId(persisted.sessionId);
+          setMessages(persisted.messages);
+          setMemory(persisted.memory);
+          setInput("");
+          setError("");
+        }, 0);
+        return () => {
+          active = false;
+          window.clearTimeout(timer);
+        };
+      }
+    }
 
     async function bootstrap() {
       onBeforeBootstrap?.();
@@ -71,6 +119,7 @@ export function useChatSession({
           return;
         }
         setSessionId(session.session_id);
+        activeStorageKeyRef.current = storageKey;
         if (initialAssistantMessage) {
           setMessages([{ role: "assistant", content: initialAssistantMessage }]);
         }
@@ -94,7 +143,19 @@ export function useChatSession({
     return () => {
       active = false;
     };
-  }, [enabled, initialAssistantMessage, meetingId, mode, onBeforeBootstrap, onBootstrapError, refreshToken]);
+  }, [enabled, initialAssistantMessage, meetingId, mode, onBeforeBootstrap, onBootstrapError, refreshToken, storageKey, userId]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !sessionId ||
+      activeStorageKeyRef.current !== storageKey
+    ) {
+      return;
+    }
+    const payload: PersistedChatSession = { sessionId, messages, memory };
+    window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
+  }, [memory, messages, sessionId, storageKey]);
 
   const submitMessage = useCallback(
     async (message: string) => {
@@ -125,16 +186,34 @@ export function useChatSession({
         setMemory(response.memory);
         return true;
       } catch (submitError) {
+        if (submitError instanceof ApiError && submitError.status === 404) {
+          if (typeof window !== "undefined") {
+            window.sessionStorage.removeItem(storageKey);
+          }
+          restoredKeyRef.current = null;
+          activeStorageKeyRef.current = null;
+          setSessionId("");
+          setMessages([]);
+          setMemory(null);
+          setError("会话已过期，已为你创建新的问答会话，请重新提问。");
+          setRefreshToken((current) => current + 1);
+          return false;
+        }
         setError(submitError instanceof Error ? submitError.message : "聊天请求失败");
         return false;
       } finally {
         setLoading(false);
       }
     },
-    [loading, maxInputLength, sessionId],
+    [loading, maxInputLength, sessionId, storageKey],
   );
 
   const resetSession = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(storageKey);
+    }
+    restoredKeyRef.current = null;
+    activeStorageKeyRef.current = null;
     setSessionId("");
     setMessages([]);
     setMemory(null);
@@ -142,7 +221,7 @@ export function useChatSession({
     setError("");
     setLoading(false);
     setRefreshToken((current) => current + 1);
-  }, []);
+  }, [storageKey]);
 
   return {
     sessionId,

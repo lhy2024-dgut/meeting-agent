@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { CurrentUser } from "@/types/api";
@@ -60,7 +60,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    void refreshUser();
+    const timer = window.setTimeout(() => {
+      void refreshUser();
+    }, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
@@ -92,18 +95,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const value = useMemo<AuthContextValue>(
-    () => ({
-      user,
-      loading,
-      authenticated: Boolean(user),
-      login,
-      register,
-      logout,
-      refreshUser,
-    }),
-    [loading, user],
-  );
+  const value: AuthContextValue = {
+    user,
+    loading,
+    authenticated: Boolean(user),
+    login,
+    register,
+    logout,
+    refreshUser,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

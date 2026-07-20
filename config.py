@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,13 +26,15 @@ DATABASE_URL = os.getenv(
 )
 
 # Auth
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
+# Never ship a predictable signing key or administrator password. Deployments that
+# need sessions to survive restarts must provide these values through `.env`.
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_urlsafe(48)
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")
-DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "ChangeMe123!")
+DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
 DEFAULT_ADMIN_DISPLAY_NAME = os.getenv("DEFAULT_ADMIN_DISPLAY_NAME", "Administrator")
 
 # LLM (Ollama)
@@ -73,7 +76,12 @@ RECALL_MULTIPLIER = int(os.getenv("RECALL_MULTIPLIER", "4"))
 
 # Labels
 DURATION_LABELS = {"short": "短会", "medium": "中等", "long": "长会"}
-ENV_LABELS = {"quiet": "安静", "noisy": "嘈杂", "multi_speaker": "多人"}
+ENV_LABELS = {
+    "quiet": "安静",
+    "noisy": "嘈杂",
+    "multi_speaker": "多人",
+    "unknown": "未知",
+}
 FUNASR_MODEL_DIR = Path(
     os.getenv(
         "FUNASR_MODEL_DIR",

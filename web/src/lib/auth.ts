@@ -29,6 +29,14 @@ export function setAuthTokens(accessToken: string, refreshToken: string) {
 export function clearAuthTokens() {
   deleteCookie(ACCESS_TOKEN_COOKIE);
   deleteCookie(REFRESH_TOKEN_COOKIE);
+  if (typeof window !== "undefined") {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith("meeting-agent-chat:")) {
+        window.sessionStorage.removeItem(key);
+      }
+    }
+  }
 }
 
 export function getAccessTokenClient(): string | null {
@@ -39,15 +47,32 @@ export function getRefreshTokenClient(): string | null {
   return getCookie(REFRESH_TOKEN_COOKIE);
 }
 
+function parseCookieValue(cookieHeader: string, name: string): string | null {
+  const prefix = `${name}=`;
+  for (const part of cookieHeader.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length));
+    }
+  }
+  return null;
+}
+
 export async function getAccessToken(): Promise<string | null> {
   if (typeof window !== "undefined") {
     return getAccessTokenClient();
   }
 
   try {
-    const { cookies } = await import("next/headers");
+    const { cookies, headers } = await import("next/headers");
     const store = await cookies();
-    return store.get(ACCESS_TOKEN_COOKIE)?.value ?? null;
+    const tokenFromCookies = store.get(ACCESS_TOKEN_COOKIE)?.value ?? null;
+    if (tokenFromCookies) {
+      return tokenFromCookies;
+    }
+    const headerStore = await headers();
+    const cookieHeader = headerStore.get("cookie") ?? "";
+    return parseCookieValue(cookieHeader, ACCESS_TOKEN_COOKIE);
   } catch {
     return null;
   }
@@ -59,9 +84,15 @@ export async function getRefreshToken(): Promise<string | null> {
   }
 
   try {
-    const { cookies } = await import("next/headers");
+    const { cookies, headers } = await import("next/headers");
     const store = await cookies();
-    return store.get(REFRESH_TOKEN_COOKIE)?.value ?? null;
+    const tokenFromCookies = store.get(REFRESH_TOKEN_COOKIE)?.value ?? null;
+    if (tokenFromCookies) {
+      return tokenFromCookies;
+    }
+    const headerStore = await headers();
+    const cookieHeader = headerStore.get("cookie") ?? "";
+    return parseCookieValue(cookieHeader, REFRESH_TOKEN_COOKIE);
   } catch {
     return null;
   }

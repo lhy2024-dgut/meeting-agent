@@ -115,8 +115,10 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
 
   useEffect(() => {
     if (!isRecording) {
-      setElapsedSeconds(session?.duration_seconds ?? 0);
-      return;
+      const timer = window.setTimeout(() => {
+        setElapsedSeconds(session?.duration_seconds ?? 0);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     const timer = window.setInterval(() => {

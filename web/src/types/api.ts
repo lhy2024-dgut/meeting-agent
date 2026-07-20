@@ -134,6 +134,8 @@ export type TodoItem = {
   due_date: string | null;
   status: "pending" | "done" | "cancelled";
   priority: "high" | "medium" | "low";
+  source: "manual" | "meeting_pipeline";
+  is_user_modified: boolean;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -216,6 +218,11 @@ export type StatsOverviewResponse = {
   medium_meetings: number;
   long_meetings: number;
   multi_speaker_meetings: number;
+  total_todos: number;
+  completed_todos: number;
+  overdue_todos: number;
+  todo_completion_rate: number;
+  todo_assignee_distribution: DistributionItem[];
   duration_distribution: DistributionItem[];
   environment_distribution: DistributionItem[];
   monthly_trend: TrendItem[];

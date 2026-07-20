@@ -153,12 +153,8 @@ async function handleUnauthorized(path: string) {
     return;
   }
 
-  try {
-    const { redirect } = await import("next/navigation");
-    redirect("/login");
-  } catch {
-    return;
-  }
+  const { redirect } = await import("next/navigation");
+  redirect("/login");
 }
 
 function formatErrorMessage(payload: ApiErrorPayload | null, status: number): string {
@@ -266,6 +262,15 @@ async function requestJson<T>(
 
     return response.json() as Promise<T>;
   } catch (error) {
+    if (
+      typeof window === "undefined" &&
+      error &&
+      typeof error === "object" &&
+      "digest" in error &&
+      String(error.digest).startsWith("NEXT_REDIRECT")
+    ) {
+      throw error;
+    }
     if (error instanceof ApiError) {
       throw error;
     }
@@ -602,7 +607,6 @@ export function updateTodoStatus(
   todoId: number,
   payload: {
     status: string;
-    changed_by?: string;
     reason?: string | null;
   },
   options?: ApiRequestOptions,
