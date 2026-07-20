@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/cards";
 import { useJobPolling } from "@/hooks/use-job-polling";
 import { getAccessTokenClient } from "@/lib/auth";
 import {
+  ApiError,
   createRealtimeGenerateJob,
   createRealtimeSession,
   deleteRealtimeSession,
@@ -157,19 +158,39 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
     chunkIndexRef.current += 1;
     setIsUploading(true);
     uploadChainRef.current = uploadChainRef.current
-      .then(async () => {
-        const formData = new FormData();
-        formData.append("file", blob, `chunk_${chunkIndex}.webm`);
-        formData.append("chunk_index", String(chunkIndex));
-        const nextState = await uploadRealtimeChunk(sessionIdRef.current!, formData);
-        setSession(nextState);
-      })
+      .then(() => uploadChunkWithRetry(chunkIndex, blob))
       .catch((uploadError) => {
         setError(uploadError instanceof Error ? uploadError.message : "上传录音分片失败");
       })
       .finally(() => {
         setIsUploading(false);
       });
+  }
+
+  // 对同一分片带退避重试：后端对暂时性失败返回 503（需重传），超时/网络中断也应重试。
+  // 后端按索引幂等去重，重传同一分片安全；分片链串行，保证录音顺序不乱。
+  async function uploadChunkWithRetry(chunkIndex: number, blob: Blob) {
+    const MAX_ATTEMPTS = 4;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return; // 会话已结束/清理，放弃该分片
+      try {
+        const formData = new FormData();
+        formData.append("file", blob, `chunk_${chunkIndex}.webm`);
+        formData.append("chunk_index", String(chunkIndex));
+        const nextState = await uploadRealtimeChunk(sessionId, formData);
+        setSession(nextState);
+        return;
+      } catch (uploadError) {
+        const retriable =
+          uploadError instanceof ApiError &&
+          (uploadError.status === 503 || uploadError.isTimeout || uploadError.status === 0);
+        if (!retriable || attempt === MAX_ATTEMPTS) {
+          throw uploadError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt)); // 线性退避
+      }
+    }
   }
 
   // 启动一段独立录制：录满 CHUNK_DURATION_MS 后 stop()，

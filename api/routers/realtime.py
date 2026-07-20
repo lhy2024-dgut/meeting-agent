@@ -11,7 +11,11 @@ from api.schemas.realtime import (
     RealtimeSessionResponse,
 )
 from api.services.job_manager import job_manager
-from api.services.realtime_session_manager import normalize_terms, realtime_session_manager
+from api.services.realtime_session_manager import (
+    RetryableChunkError,
+    normalize_terms,
+    realtime_session_manager,
+)
 
 router = APIRouter(prefix="/api/realtime", tags=["realtime"])
 
@@ -75,6 +79,9 @@ async def append_realtime_chunk(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Realtime session not found") from exc
+    except RetryableChunkError as exc:
+        # 503：暂时性失败，前端应重传同一分片（不推进 chunk 索引）
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RealtimeSessionResponse(**realtime_session_manager.serialize(session))
