@@ -1,5 +1,6 @@
 ﻿import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -379,15 +380,11 @@ class MeetingService:
             progress_callback(72, "📝 生成摘要...")
         short_summary, project_name = self._generate_summary(transcript, minutes)
 
-        stored_segments = segments
-        if diarize_audio and file_path:
-            if progress_callback:
-                progress_callback(78, "🗣️ 识别说话人...")
-            stored_segments = self._diarize_segments(file_path, fallback=segments)
-
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
-        self.db.add_transcriptions_bulk(meeting_id, stored_segments, user_id=user_id)
+        # 先保存不带说话人的转录，纪要立即可用；说话人识别改为后台异步执行，
+        # 完成后再用带说话人标签的分句覆盖转录（用户刷新详情页即可看到）。
+        self.db.add_transcriptions_bulk(meeting_id, segments, user_id=user_id)
         self.db.update_meeting_results(
             meeting_id,
             minutes,
@@ -425,6 +422,10 @@ class MeetingService:
             "resolutions": resolutions,
         }
         output_path = self.export_chain.run(output_data, output_format, template_path)
+
+        # 后台异步说话人识别：不阻塞纪要生成，完成后覆盖转录的说话人标签
+        if diarize_audio and file_path:
+            self._spawn_diarization(meeting_id, file_path, user_id)
 
         if progress_callback:
             progress_callback(100, "OK 完成")
@@ -472,6 +473,31 @@ class MeetingService:
             }
             for item in spk_segments
         ]
+
+    @staticmethod
+    def _spawn_diarization(meeting_id, audio_path, user_id):
+        """后台线程执行说话人识别，完成后用带说话人标签的分句覆盖该会议的转录。
+
+        不阻塞纪要生成主流程；失败或无结果时保留原始（无说话人）转录。
+        用独立的 MeetingRepository，避免与主线程共享 session。
+        """
+        def worker():
+            try:
+                diarized = MeetingService._diarize_segments(audio_path, fallback=None)
+                if not diarized:
+                    return
+                from db.repository import MeetingRepository
+
+                MeetingRepository().replace_transcriptions(
+                    meeting_id, diarized, user_id=user_id
+                )
+                logger.info("后台说话人识别完成并更新转录: meeting=%s", meeting_id)
+            except Exception as exc:
+                logger.warning("后台说话人识别失败: meeting=%s err=%s", meeting_id, exc)
+
+        threading.Thread(
+            target=worker, daemon=True, name=f"diarize-{meeting_id}"
+        ).start()
 
     @staticmethod
     def _generate_summary(transcript, minutes):
