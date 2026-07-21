@@ -476,14 +476,49 @@ class MeetingService:
         ]
 
     @staticmethod
+    def _throttle_current_thread_cpu():
+        """给后台说话人识别限速：限制 torch 线程数并降低本线程优先级，
+        避免 cam++ 全量推理占满 CPU、饿死正在服务的 Web 请求（如登录）。
+
+        - torch 线程限制为「总核数-2」（至少 1），给请求服务留出核心；
+        - Windows 下把当前后台线程优先级降到 LOWEST，让请求线程优先被调度。
+        全部为尽力而为，失败不影响识别本身。
+        """
+        import os
+
+        reserve = max(1, (os.cpu_count() or 4) - 2)
+        try:
+            import torch
+
+            torch.set_num_threads(reserve)
+        except Exception:
+            pass
+        try:
+            os.environ.setdefault("OMP_NUM_THREADS", str(reserve))
+        except Exception:
+            pass
+        try:
+            import ctypes
+
+            THREAD_PRIORITY_LOWEST = -2
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetThreadPriority(
+                kernel32.GetCurrentThread(), THREAD_PRIORITY_LOWEST
+            )
+        except Exception:
+            pass
+
+    @staticmethod
     def _spawn_diarization(meeting_id, audio_path, user_id):
         """后台线程执行说话人识别，完成后用带说话人标签的分句覆盖该会议的转录。
 
         不阻塞纪要生成主流程；失败或无结果时保留原始（无说话人）转录。
         用独立的 MeetingRepository，避免与主线程共享 session。
+        识别前先对本线程做 CPU 限速，避免占满 CPU 影响 Web 请求响应。
         """
         def worker():
             try:
+                MeetingService._throttle_current_thread_cpu()
                 diarized = MeetingService._diarize_segments(audio_path, fallback=None)
                 if not diarized:
                     return
