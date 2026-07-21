@@ -16,6 +16,7 @@ import {
   MeetingEmailSendResponse,
   MeetingDetail,
   MeetingListResponse,
+  MeetingMeta,
   MeetingMutationResponse,
   MeetingTermsResponse,
   RealtimeSessionCreateRequest,
@@ -88,6 +89,28 @@ export class ApiError extends Error {
 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
+}
+
+/**
+ * 取会议原始录音，返回可直接用于 <audio src> 的 object URL。
+ *
+ * 后端音频端点用 Bearer token 鉴权，<audio> 标签无法携带该请求头，
+ * 因此这里用已鉴权的 fetch 取回整段 blob 再转成 object URL。调用方在卸载时
+ * 需 URL.revokeObjectURL() 释放。
+ */
+export async function fetchMeetingAudioObjectUrl(meetingId: number): Promise<string> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/meetings/${meetingId}/audio`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new ApiError({
+      message: `无法加载录音（${response.status}）`,
+      status: response.status,
+    });
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 async function resolveHeaders(initHeaders?: HeadersInit): Promise<Headers> {
@@ -533,6 +556,28 @@ export function getTranscript(
   return requestJson<TranscriptResponse>(`/meetings/${meetingId}/transcript`, {}, options);
 }
 
+export function getMeetingMeta(
+  meetingId: string | number,
+  options?: ApiRequestOptions,
+): Promise<MeetingMeta> {
+  return requestJson<MeetingMeta>(`/meetings/${meetingId}/meta`, {}, options);
+}
+
+export function verifyPassword(
+  password: string,
+  options?: ApiRequestOptions,
+): Promise<{ valid: boolean }> {
+  return requestJson<{ valid: boolean }>(
+    "/auth/password/verify",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    },
+    options,
+  );
+}
+
 export function getStatsOverview(options?: ApiRequestOptions): Promise<StatsOverviewResponse> {
   return requestJson<StatsOverviewResponse>("/stats/overview", {}, options);
 }
@@ -945,12 +990,15 @@ export function diarizeRealtimeSession(
 
 export function createRealtimeGenerateJob(
   sessionId: string,
+  isPrivate: boolean,
   options?: ApiRequestOptions,
 ): Promise<CreateJobResponse> {
   return requestJson<CreateJobResponse>(
     `/realtime/sessions/${sessionId}/generate`,
     {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_private: isPrivate }),
     },
     options,
   );

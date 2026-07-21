@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 
 import { useJobPolling } from "@/hooks/use-job-polling";
 import { createMeetingProcessJob, getApiBaseUrl } from "@/lib/api";
+import { markMeetingFresh } from "@/lib/privacy";
+import { PrivacyModal, PrivacySelector, PrivacyValue } from "@/components/ui/privacy-choice";
 import { TemplateOption, UploadMetadataResponse } from "@/types/api";
 
 type UploadPageProps = {
@@ -53,6 +55,8 @@ export function UploadPage({ metadata }: UploadPageProps) {
   const [templateName, setTemplateName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [privacy, setPrivacy] = useState<PrivacyValue>(null);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   const selectedTemplate = metadata.templates.find((item) => item.name === templateName) ?? null;
   const effectiveOutputFormat = getCompatibleOutputFormat(outputFormat, selectedTemplate);
@@ -61,6 +65,7 @@ export function UploadPage({ metadata }: UploadPageProps) {
     onSucceeded: (nextJob) => {
       setSubmitting(false);
       if (nextJob.result?.meeting_id) {
+        markMeetingFresh(nextJob.result.meeting_id);
         router.push(`/meetings/${nextJob.result.meeting_id}`);
       }
     },
@@ -74,13 +79,23 @@ export function UploadPage({ metadata }: UploadPageProps) {
     },
   });
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
       setError("请选择音频或视频文件");
       return;
     }
+    // 未选择隐私 → 弹窗询问，选择后再继续
+    if (privacy === null) {
+      setError("");
+      setShowPrivacyModal(true);
+      return;
+    }
+    void runGenerate(privacy);
+  }
 
+  async function runGenerate(isPrivate: boolean) {
+    if (!file) return;
     setSubmitting(true);
     setError("");
     try {
@@ -91,6 +106,7 @@ export function UploadPage({ metadata }: UploadPageProps) {
       formData.append("meeting_time", meetingTime);
       formData.append("output_format", effectiveOutputFormat);
       formData.append("scene", scene);
+      formData.append("is_private", isPrivate ? "true" : "false");
       if (terms.trim()) formData.append("terms", terms.trim());
       if (templateName) formData.append("template_name", templateName);
 
@@ -102,12 +118,19 @@ export function UploadPage({ metadata }: UploadPageProps) {
       }
       if (initialJob.status === "succeeded" && initialJob.result?.meeting_id) {
         setSubmitting(false);
+        markMeetingFresh(initialJob.result.meeting_id);
         router.push(`/meetings/${initialJob.result.meeting_id}`);
       }
     } catch (submitError) {
       setSubmitting(false);
       setError(submitError instanceof Error ? submitError.message : "创建任务失败");
     }
+  }
+
+  function handlePrivacyModalChoose(value: boolean) {
+    setPrivacy(value);
+    setShowPrivacyModal(false);
+    void runGenerate(value);
   }
 
   function handleTemplateChange(nextTemplateName: string) {
@@ -151,11 +174,19 @@ export function UploadPage({ metadata }: UploadPageProps) {
 
           <textarea className="input-shell min-h-[120px]" value={terms} onChange={(event) => setTerms(event.target.value)} placeholder={"术语词表（每行一个，可选）"} />
 
+          <PrivacySelector value={privacy} onChange={setPrivacy} />
+
           <div className="flex items-center gap-3">
             <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "创建任务中..." : "开始生成会议纪要"}</button>
           </div>
         </div>
       </form>
+
+      <PrivacyModal
+        open={showPrivacyModal}
+        onChoose={handlePrivacyModalChoose}
+        onCancel={() => setShowPrivacyModal(false)}
+      />
 
       {error ? <div className="error-inline">{error}</div> : null}
 

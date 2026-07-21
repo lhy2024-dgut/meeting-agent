@@ -18,6 +18,14 @@ class MeetingSummary(BaseModel):
     project_name: str
     action_item_count: int
     resolution_count: int
+    is_private: bool = False
+
+
+class MeetingMetaResponse(BaseModel):
+    id: int
+    title: str
+    date_text: str
+    is_private: bool = False
 
 
 class MeetingListResponse(BaseModel):
@@ -61,6 +69,7 @@ class MeetingDetail(BaseModel):
     action_item_count: int
     resolution_count: int
     transcript_count: int
+    is_private: bool = False
     todos: list[TodoItemResponse]
 
 
@@ -70,6 +79,7 @@ class TranscriptSegment(BaseModel):
     timestamp: float
     start_time: float
     end_time: float
+    speaker: str = ""
 
 
 class TranscriptResponse(BaseModel):

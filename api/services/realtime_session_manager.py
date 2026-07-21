@@ -196,7 +196,7 @@ class RealtimeSessionManager:
             )
         return session
 
-    def generate_meeting(self, session_id: str) -> dict[str, object]:
+    def generate_meeting(self, session_id: str, is_private: bool = False) -> dict[str, object]:
         session = self.stop_session(session_id)
         if not session.audio_path:
             raise RuntimeError("No recording available to generate a meeting")
@@ -224,6 +224,7 @@ class RealtimeSessionManager:
                 output_format=session.output_format,
                 scene=session.scene,
                 terms=session.terms or None,
+                is_private=is_private,
             )
         finally:
             self.cleanup_session(session_id, force=True)

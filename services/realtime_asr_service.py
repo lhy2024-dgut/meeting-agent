@@ -346,10 +346,12 @@ def _parse_diarization_result(res: list) -> list[dict]:
     segments = []
 
     def ms_to_s(val):
-        """FunASR 时间戳可能是毫秒整数，也可能已是秒浮点数，统一转为秒。"""
-        if isinstance(val, (int, float)) and val > 1000:
-            return round(val / 1000, 2)
-        return round(float(val), 2)
+        """FunASR sentence_info 的 start/end 统一为毫秒，一律除以 1000 转为秒。
+
+        不能用「> 1000 才除」的逐值判断：小于 1 秒（1000ms）的时间戳会被漏除，
+        例如首句从 150ms 开始会被错当成 150 秒。
+        """
+        return round(float(val or 0) / 1000, 2)
 
     def spk_label(raw_spk) -> str:
         if isinstance(raw_spk, int):

@@ -15,6 +15,8 @@ import {
   stopRealtimeSession,
   uploadRealtimeChunk,
 } from "@/lib/api";
+import { markMeetingFresh } from "@/lib/privacy";
+import { PrivacyModal, PrivacySelector, PrivacyValue } from "@/components/ui/privacy-choice";
 import { RealtimeSessionResponse, UploadMetadataResponse } from "@/types/api";
 
 type RealtimePageProps = {
@@ -62,6 +64,8 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [isDiarizing, setIsDiarizing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [privacy, setPrivacy] = useState<PrivacyValue>(null);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const uploadChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -72,6 +76,7 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   const { job, startPolling, resetJob } = useJobPolling({
     onSucceeded: (nextJob) => {
       if (nextJob.result?.meeting_id) {
+        markMeetingFresh(nextJob.result.meeting_id);
         router.push(`/meetings/${nextJob.result.meeting_id}`);
       }
     },
@@ -237,21 +242,39 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
     }
   }
 
-  async function handleGenerate() {
+  function handleGenerate() {
+    if (!session) return;
+    // 未选择隐私 → 弹窗询问，选择后再继续
+    if (privacy === null) {
+      setError("");
+      setShowPrivacyModal(true);
+      return;
+    }
+    void runGenerate(privacy);
+  }
+
+  async function runGenerate(isPrivate: boolean) {
     if (!session) return;
     setError("");
     try {
-      const created = await createRealtimeGenerateJob(session.session_id);
+      const created = await createRealtimeGenerateJob(session.session_id, isPrivate);
       const initialJob = await startPolling(created.job_id);
       if (initialJob.status === "failed") {
         setError(initialJob.error || "生成会议纪要失败");
       }
       if (initialJob.status === "succeeded" && initialJob.result?.meeting_id) {
+        markMeetingFresh(initialJob.result.meeting_id);
         router.push(`/meetings/${initialJob.result.meeting_id}`);
       }
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : "创建生成任务失败");
     }
+  }
+
+  function handlePrivacyModalChoose(value: boolean) {
+    setPrivacy(value);
+    setShowPrivacyModal(false);
+    void runGenerate(value);
   }
 
   function handleReset() {
@@ -319,6 +342,9 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
       {error ? <div className="error-inline">{error}</div> : null}
 
       <Card className="space-y-4">
+        {session && !isRecording ? (
+          <PrivacySelector value={privacy} onChange={setPrivacy} />
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="section-card-title !mb-1">{"转写结果"}</h2>
@@ -375,6 +401,12 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
           <div className="text-[12px] text-[var(--muted)]">{"状态："}{job.status}{" / 阶段："}{job.stage}</div>
         </Card>
       ) : null}
+
+      <PrivacyModal
+        open={showPrivacyModal}
+        onChoose={handlePrivacyModalChoose}
+        onCancel={() => setShowPrivacyModal(false)}
+      />
     </div>
   );
 }

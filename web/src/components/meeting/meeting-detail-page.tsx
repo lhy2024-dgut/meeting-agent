@@ -11,7 +11,7 @@ import { MeetingRegeneratePanel } from "@/components/meeting/meeting-regenerate-
 import { TodoWorkspace } from "@/components/todos/todo-workspace";
 import { Card } from "@/components/ui/cards";
 import { MinutesPaper, ResolutionSection } from "@/components/ui/meeting-sections";
-import { TranscriptList } from "@/components/ui/transcript-list";
+import { TranscriptPlayer } from "@/components/ui/transcript-player";
 import { matchSnippetScore, normalizeText } from "@/lib/source-target";
 import { MeetingDetail, MeetingSourceType, TranscriptResponse } from "@/types/api";
 
@@ -128,7 +128,7 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
 
       <div ref={minutesRef}><Card className={highlightMinutes ? "source-highlight source-highlight-minutes" : ""}><h2 className="section-card-title">{"会议纪要"}</h2><MinutesPaper text={meeting.minutes_text} /></Card></div>
 
-      <div ref={transcriptRef}><Card className={highlightTranscript ? "source-highlight source-highlight-transcript" : ""}><details open={highlightTranscript}><summary className="expander-summary">{"查看原始转录文本"}</summary><div className="mt-4"><TranscriptList segments={transcript.segments} highlighted={highlightTranscript} /></div></details></Card></div>
+      <div ref={transcriptRef}><Card className={highlightTranscript ? "source-highlight source-highlight-transcript" : ""}><details open={highlightTranscript}><summary className="expander-summary">{"查看原始转录文本"}</summary><div className="mt-4"><TranscriptPlayer meetingId={meeting.id} segments={transcript.segments} highlighted={highlightTranscript} /></div></details></Card></div>
 
       <HtmlSummaryPanel meetingId={meeting.id} />
 

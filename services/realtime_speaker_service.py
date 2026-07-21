@@ -66,10 +66,10 @@ def _parse_diarization_result(result: list) -> list[dict]:
 
 
 def _normalize_timestamp(value) -> float:
-    numeric = float(value or 0)
-    if numeric > 1000:
-        return round(numeric / 1000, 2)
-    return round(numeric, 2)
+    # FunASR sentence_info 的 start/end 统一为毫秒，一律除以 1000 转为秒。
+    # 不能用「> 1000 才除」的逐值判断：小于 1 秒（1000ms）的时间戳会被漏除，
+    # 例如首句从 150ms 开始会被错当成 150 秒。
+    return round(float(value or 0) / 1000, 2)
 
 
 def _format_speaker_label(raw) -> str:

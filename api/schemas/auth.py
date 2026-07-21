@@ -48,6 +48,14 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
+class VerifyPasswordResponse(BaseModel):
+    valid: bool
+
+
 class UserSmtpSettingsResponse(BaseModel):
     smtp_host: str
     smtp_port: int

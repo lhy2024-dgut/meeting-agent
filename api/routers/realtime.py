@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from api.deps import get_current_user
 from api.schemas.jobs import CreateJobResponse
 from api.schemas.realtime import (
+    RealtimeGenerateRequest,
     RealtimeSessionCreateRequest,
     RealtimeSessionMutationResponse,
     RealtimeSessionResponse,
@@ -104,13 +105,15 @@ def diarize_realtime_session(
 @router.post("/sessions/{session_id}/generate", response_model=CreateJobResponse)
 def generate_realtime_meeting(
     session_id: str,
+    payload: RealtimeGenerateRequest = RealtimeGenerateRequest(),
     current_user=Depends(get_current_user),
 ) -> CreateJobResponse:
     _get_owned_session(session_id, current_user.id)
     job = job_manager.create_job("realtime_meeting_process")
+    is_private = payload.is_private
 
     def run_generate():
-        return realtime_session_manager.generate_meeting(session_id)
+        return realtime_session_manager.generate_meeting(session_id, is_private=is_private)
 
     job_manager.run_in_thread(job.job_id, run_generate)
     return CreateJobResponse(job_id=job.job_id, status=job.status)

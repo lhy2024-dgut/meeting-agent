@@ -16,6 +16,8 @@ from api.schemas.auth import (
     UpdateProfileRequest,
     UpdateUserSmtpSettingsRequest,
     UserSmtpSettingsResponse,
+    VerifyPasswordRequest,
+    VerifyPasswordResponse,
 )
 from db.repository import MeetingRepository
 from services.auth_service import (
@@ -224,6 +226,16 @@ def change_password(
     if not success:
         raise HTTPException(status_code=404, detail="User not found")
     return AuthMutationResponse(success=True)
+
+
+@router.post("/password/verify", response_model=VerifyPasswordResponse)
+def verify_current_password(
+    payload: VerifyPasswordRequest,
+    current_user=Depends(get_current_user),
+) -> VerifyPasswordResponse:
+    """校验当前登录用户的密码（用于查看私密会议前的二次确认）。"""
+    valid = verify_password(payload.password, current_user.password_hash)
+    return VerifyPasswordResponse(valid=valid)
 
 
 @router.get("/smtp", response_model=UserSmtpSettingsResponse)

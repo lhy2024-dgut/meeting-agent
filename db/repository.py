@@ -175,6 +175,7 @@ class MeetingRepository:
         file_hash="",
         user_id=None,
         created_at=None,
+        is_private=False,
     ):
         with self._write_session() as session:
             owner_id = user_id or self._ensure_default_user(session).id
@@ -186,6 +187,7 @@ class MeetingRepository:
                 environment=environment,
                 file_hash=file_hash,
                 created_at=created_at or datetime.now(),
+                is_private=is_private,
             )
             session.add(meeting)
             session.flush()
@@ -239,6 +241,7 @@ class MeetingRepository:
                     "end_time": seg.get("end", 0.0),
                     "summary": text_content,
                     "audio_segment": seg.get("audio_segment", ""),
+                    "speaker": seg.get("speaker") or seg.get("spk") or "",
                 }
             )
         with self._write_session() as session:
@@ -276,6 +279,7 @@ class MeetingRepository:
                         "end_time": seg.get("end", 0.0),
                         "summary": text_content,
                         "audio_segment": seg.get("audio_segment", ""),
+                        "speaker": seg.get("speaker") or seg.get("spk") or "",
                     }
                 )
             session.bulk_insert_mappings(Transcription, mappings)

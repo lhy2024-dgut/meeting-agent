@@ -55,6 +55,7 @@ class Meeting(Base):
     duration_category = Column(String(50))
     environment = Column(String(100))
     file_hash = Column(String(64), index=True)
+    is_private = Column(Boolean, nullable=False, default=False, server_default="false")
 
     minutes_text = Column(Text)
     action_items_text = Column(Text)
@@ -96,6 +97,7 @@ class Transcription(Base):
     end_time = Column(Float)
     audio_segment = Column(String(500))
     summary = Column(Text)
+    speaker = Column(String(64))
 
     meeting = relationship("Meeting", back_populates="transcriptions")
 

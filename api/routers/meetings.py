@@ -3,6 +3,7 @@ from pathlib import Path
 
 import config
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.deps import get_current_user, get_meeting_repository
@@ -12,6 +13,7 @@ from api.schemas.meetings import (
     HtmlSummaryResponse,
     MeetingDetail,
     MeetingListResponse,
+    MeetingMetaResponse,
     MeetingMutationResponse,
     MeetingProjectUpdateRequest,
     MeetingSummary,
@@ -37,6 +39,17 @@ from services.terms_service import load_terms, save_terms, truncate_terms
 from services.todo_service import TodoService, parse_action_items_text
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+
+_AUDIO_MEDIA_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".webm": "audio/webm",
+    ".mp4": "video/mp4",
+}
 
 
 class MeetingRegenerateRequest(BaseModel):
@@ -83,10 +96,16 @@ def _serialize_summary(meeting) -> MeetingSummary:
         project_name=meeting.project_name or "",
         action_item_count=_count_action_items(meeting.action_items_text),
         resolution_count=_count_resolutions(meeting.resolutions_text),
+        is_private=bool(meeting.is_private),
     )
 
 
 def _serialize_segments(transcriptions) -> list[TranscriptSegment]:
+    # 按时间戳升序（说话人识别返回的分句顺序不保证按时间）
+    ordered = sorted(
+        transcriptions,
+        key=lambda item: (item.start_time or 0.0, item.end_time or 0.0),
+    )
     return [
         TranscriptSegment(
             id=item.id,
@@ -94,8 +113,9 @@ def _serialize_segments(transcriptions) -> list[TranscriptSegment]:
             timestamp=item.timestamp or 0.0,
             start_time=item.start_time or 0.0,
             end_time=item.end_time or 0.0,
+            speaker=item.speaker or "",
         )
-        for item in transcriptions
+        for item in ordered
     ]
 
 
@@ -239,7 +259,27 @@ def get_meeting(
         action_item_count=len(todos),
         resolution_count=_count_resolutions(meeting.resolutions_text),
         transcript_count=len(segments),
+        is_private=bool(meeting.is_private),
         todos=todos,
+    )
+
+
+@router.get("/{meeting_id}/meta", response_model=MeetingMetaResponse)
+def get_meeting_meta(
+    meeting_id: int,
+    repo: MeetingRepository = Depends(get_meeting_repository),
+    current_user=Depends(get_current_user),
+) -> MeetingMetaResponse:
+    """轻量元信息：只返回是否私密等，不含纪要/转录正文。
+
+    供详情页在渲染前判断是否需要密码门，避免把私密正文下发到 HTML。
+    """
+    meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    return MeetingMetaResponse(
+        id=meeting.id,
+        title=meeting.title,
+        date_text=meeting.created_at.strftime("%Y-%m-%d %H:%M") if meeting.created_at else "",
+        is_private=bool(meeting.is_private),
     )
 
 
@@ -259,6 +299,24 @@ def get_transcript(
         full_text=full_text,
         segments=segments,
     )
+
+
+@router.get("/{meeting_id}/audio")
+def get_meeting_audio(
+    meeting_id: int,
+    repo: MeetingRepository = Depends(get_meeting_repository),
+    current_user=Depends(get_current_user),
+) -> FileResponse:
+    meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    if not meeting.audio_path:
+        raise HTTPException(status_code=404, detail="Original audio file is missing")
+    audio_path = Path(meeting.audio_path)
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Original audio file is missing")
+
+    media_type = _AUDIO_MEDIA_TYPES.get(audio_path.suffix.lower(), "application/octet-stream")
+    # FileResponse 支持 Range 请求，便于前端拖动进度条时按需加载
+    return FileResponse(path=str(audio_path), media_type=media_type, filename=audio_path.name)
 
 
 @router.get("/{meeting_id}/html-summary", response_model=HtmlSummaryResponse)
@@ -484,6 +542,7 @@ async def process_meeting(
     transcription_mode: str = Form("auto"),
     terms: str | None = Form(None),
     template_name: str | None = Form(None),
+    is_private: bool = Form(False),
     current_user=Depends(get_current_user),
 ) -> CreateJobResponse:
     if not file.filename:
@@ -555,6 +614,7 @@ async def process_meeting(
             terms=parsed_terms or None,
             chunk_strategy=chunk_strategy,
             transcription_mode=transcription_mode,
+            is_private=is_private,
         ):
             if event["type"] == "complete":
                 result = event["data"]

@@ -72,6 +72,7 @@ class MeetingService:
         asr_model=ASR_MODEL_WHISPER,
         terms=None,
         chunk_strategy=None,
+        is_private=False,
     ):
         """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
         cached = self.db.get_meeting_by_hash(file_hash, user_id=user_id)
@@ -102,6 +103,8 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            diarize_audio=True,
+            is_private=is_private,
         )
 
     def process_stream(
@@ -120,6 +123,7 @@ class MeetingService:
         terms=None,
         chunk_strategy=None,
         transcription_mode="auto",
+        is_private=False,
     ):
         """流式处理：边转写边返回结果。"""
         engine = self._get_engine(asr_model)
@@ -189,6 +193,8 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            diarize_audio=True,
+            is_private=is_private,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -214,6 +220,7 @@ class MeetingService:
         custom_headings=None,
         terms=None,
         chunk_strategy=None,
+        is_private=False,
     ):
         """使用实时录音阶段已经累计好的转写结果生成会议纪要。"""
         transcript = " ".join(seg.get("text", "") for seg in segments)
@@ -233,6 +240,7 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model="realtime-browser",
             user_id=user_id,
+            is_private=is_private,
         )
 
     def _handle_cache_hit(self, cached, output_format, template_path, progress_callback):
@@ -301,8 +309,15 @@ class MeetingService:
         chunk_strategy=None,
         asr_model=None,
         user_id=None,
+        diarize_audio=False,
+        is_private=False,
     ):
-        """Steps 3-7: 分类 -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。"""
+        """Steps 3-7: 分类 -> (说话人识别) -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。
+
+        diarize_audio=True 时（上传/普通处理），在保存前对原始音频运行离线说话人
+        识别，用带说话人标签的分句替换落库/展示用的 segments；会议纪要仍使用传入的
+        ASR transcript，不受影响。实时流程传入的 segments 已含 speaker，无需重复识别。
+        """
         if progress_callback:
             progress_callback(55, "📊 分析会议特征...")
         duration = max((seg.get("end", 0) for seg in segments), default=0)
@@ -315,6 +330,7 @@ class MeetingService:
             file_hash,
             user_id=user_id,
             created_at=meeting_dt,
+            is_private=is_private,
         )
 
         if terms:
@@ -363,9 +379,15 @@ class MeetingService:
             progress_callback(72, "📝 生成摘要...")
         short_summary, project_name = self._generate_summary(transcript, minutes)
 
+        stored_segments = segments
+        if diarize_audio and file_path:
+            if progress_callback:
+                progress_callback(78, "🗣️ 识别说话人...")
+            stored_segments = self._diarize_segments(file_path, fallback=segments)
+
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
-        self.db.add_transcriptions_bulk(meeting_id, segments, user_id=user_id)
+        self.db.add_transcriptions_bulk(meeting_id, stored_segments, user_id=user_id)
         self.db.update_meeting_results(
             meeting_id,
             minutes,
@@ -421,6 +443,35 @@ class MeetingService:
             "duration_category": duration_category,
             "environment": environment,
         }
+
+    @staticmethod
+    def _diarize_segments(audio_path, fallback):
+        """对原始音频运行离线说话人识别，返回带 speaker 标签的分句列表。
+
+        复用与实时转写一致的 speaker_service（paraformer-zh + fsmn-vad + ct-punc + cam++）。
+        识别失败或无结果时回退到传入的 fallback segments（不带说话人），不阻断主流程。
+        """
+        try:
+            from services.realtime_speaker_service import speaker_service
+
+            spk_segments = speaker_service.diarize(audio_path)
+        except Exception as exc:
+            logger.warning("说话人识别失败，回退无说话人转录: %s", exc)
+            return fallback
+
+        if not spk_segments:
+            logger.warning("说话人识别无结果，回退无说话人转录")
+            return fallback
+
+        return [
+            {
+                "text": item.get("text", ""),
+                "start": item.get("start", 0.0),
+                "end": item.get("end", 0.0),
+                "speaker": item.get("spk", ""),
+            }
+            for item in spk_segments
+        ]
 
     @staticmethod
     def _generate_summary(transcript, minutes):
