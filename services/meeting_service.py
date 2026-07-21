@@ -343,7 +343,8 @@ class MeetingService:
         if progress_callback:
             progress_callback(65, "🤖 生成会议纪要...")
         date_str = meeting_dt.strftime("%Y-%m-%d %H:%M")
-        action_items, resolutions, minutes = self.minutes_chain.run(
+        # 纪要、待办、决议、摘要、项目名在同一次 LLM 调用中一并产出
+        action_items, resolutions, minutes, short_summary, project_name = self.minutes_chain.run(
             transcript,
             title=title,
             date=date_str,
@@ -375,10 +376,10 @@ class MeetingService:
             action_items = PLACEHOLDER_NO_ACTION
         if not (resolutions or "").strip():
             resolutions = PLACEHOLDER_NO_RESOLUTION
-
-        if progress_callback:
-            progress_callback(72, "📝 生成摘要...")
-        short_summary, project_name = self._generate_summary(transcript, minutes)
+        if not (short_summary or "").strip():
+            short_summary = (minutes or "")[:200]
+        if not (project_name or "").strip():
+            project_name = "未分类"
 
         if progress_callback:
             progress_callback(80, "💾 保存结果...")

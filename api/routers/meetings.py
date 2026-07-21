@@ -476,7 +476,8 @@ def regenerate_meeting(
         on_progress(65, "生成新的会议纪要")
         date_str = current.created_at.strftime("%Y-%m-%d %H:%M") if current.created_at else ""
         chain = MinutesChain()
-        action_items, resolutions, minutes = chain.run(
+        # 纪要与摘要/项目名一并在同一次 LLM 调用中产出
+        action_items, resolutions, minutes, short_summary, project_name = chain.run(
             transcript,
             title=current.title,
             date=date_str,
@@ -485,9 +486,12 @@ def regenerate_meeting(
             action_items = PLACEHOLDER_NO_ACTION
         if not (resolutions or "").strip():
             resolutions = PLACEHOLDER_NO_RESOLUTION
+        if not (short_summary or "").strip():
+            short_summary = (minutes or "")[:200]
+        if not (project_name or "").strip():
+            project_name = "未分类"
 
         on_progress(82, "保存新的会议结果")
-        short_summary, project_name = service._generate_summary(transcript, minutes)
         fresh_repo.replace_transcriptions(meeting_id, segments, user_id=current_user.id)
         fresh_repo.update_meeting_results(
             meeting_id,
