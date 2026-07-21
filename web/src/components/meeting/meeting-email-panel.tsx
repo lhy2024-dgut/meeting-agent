@@ -73,17 +73,9 @@ export function MeetingEmailPanel({
     }
   }, [meetingId]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadData();
-      void checkHtmlSummary();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loadData]);
-
   // 由父页面通过 prop 或 HtmlSummaryPanel 通知是否已生成，
   // 避免在此重复发起 html-summary 请求造成不必要的 401 噪音。
-  async function checkHtmlSummary() {
+  const checkHtmlSummary = useCallback(async () => {
     try {
       await requestBrowserJson<{ html: string }>(`/meetings/${meetingId}/html-summary`);
       setHtmlSummaryAvailable(true);
@@ -91,7 +83,15 @@ export function MeetingEmailPanel({
       setHtmlSummaryAvailable(false);
       setAttachHtmlSummary(false);
     }
-  }
+  }, [meetingId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadData();
+      void checkHtmlSummary();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [checkHtmlSummary, loadData]);
 
   async function handleSend() {
     if (!subject.trim()) {

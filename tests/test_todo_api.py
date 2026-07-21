@@ -81,6 +81,34 @@ def test_todo_crud_and_logs(tmp_path):
     assert logs.json()["items"][0]["changed_by"] == f"user:{user.id}"
 
 
+def test_todo_update_returns_404_for_other_user_and_400_for_invalid_payload(tmp_path):
+    repo = _build_repo(tmp_path)
+    alice = repo.create_user("alice", "alice@example.com", hash_password("StrongPass1"), "Alice")
+    bob = repo.create_user("bob", "bob@example.com", hash_password("StrongPass2"), "Bob")
+    meeting_id = repo.create_meeting("Alice Meeting", "a.wav", "short", "quiet", "hash-a", user_id=alice.id)
+    todo = TodoService(repo).create_todo(alice.id, meeting_id, content="Alice todo")
+
+    app = FastAPI()
+    app.include_router(todos.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    current_user = {"value": SimpleNamespace(id=bob.id, username=bob.username)}
+    app.dependency_overrides[get_current_user] = lambda: current_user["value"]
+    client = TestClient(app)
+
+    other_user_update = client.patch(
+        f"/api/todos/{todo.id}",
+        json={"content": "Bob edit"},
+    )
+    assert other_user_update.status_code == 404
+
+    current_user["value"] = SimpleNamespace(id=alice.id, username=alice.username)
+    invalid_payload = client.patch(
+        f"/api/todos/{todo.id}",
+        json={"content": ""},
+    )
+    assert invalid_payload.status_code == 400
+
+
 def test_meeting_detail_returns_synced_todos(tmp_path):
     repo = _build_repo(tmp_path)
     user = repo.create_user("alice", "alice@example.com", hash_password("StrongPass1"), "Alice")

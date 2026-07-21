@@ -40,6 +40,9 @@ def _make_engine(target_url: str):
 
 def _register_vector_adapters(engine):
     """在 psycopg2 连接上注册 pgvector 类型适配器"""
+    if engine.dialect.name != "postgresql":
+        return
+
     try:
         from pgvector.psycopg2 import register_vector
 

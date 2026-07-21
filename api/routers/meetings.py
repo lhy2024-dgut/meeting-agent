@@ -429,7 +429,11 @@ def regenerate_meeting(
             resolutions = PLACEHOLDER_NO_RESOLUTION
 
         on_progress(82, "保存新的会议结果")
-        short_summary, project_name = service._generate_summary(transcript, minutes)
+        short_summary, project_name = service._generate_summary(
+            transcript,
+            minutes,
+            title=current.title,
+        )
         fresh_repo.replace_transcriptions(meeting_id, segments, user_id=current_user.id)
         fresh_repo.update_meeting_results(
             meeting_id,

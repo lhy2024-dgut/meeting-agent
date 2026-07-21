@@ -108,10 +108,12 @@ def update_todo(
             due_date=payload.due_date if "due_date" in payload.model_fields_set else _UNSET,
             priority=payload.priority,
         )
+    except TodoTransitionError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except TodoTransitionError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _serialize_todo(todo)
 
 

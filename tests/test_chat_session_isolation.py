@@ -6,7 +6,8 @@ from sqlalchemy import create_engine
 
 from api.deps import get_current_user, get_meeting_repository
 from api.routers import chat
-from api.services.chat_session_manager import ChatSession, ChatSessionManager, chat_session_manager
+from api.services.chat_session_manager import ChatSession, ChatSessionManager
+from api.services.chat_session_manager import chat_session_manager
 from db.models import Base
 from db.repository import MeetingRepository
 from services.auth_service import hash_password

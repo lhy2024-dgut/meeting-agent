@@ -33,14 +33,14 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/**
- * 直接 fetch 获取当前用户，不经过 requestJson/handleUnauthorized，
- * 避免 401 时自动清 token 并触发全局跳转。
- */
-async function fetchCurrentUser(token: string): Promise<CurrentUser | null> {
+async function fetchCurrentUser(token?: string | null): Promise<CurrentUser | null> {
   try {
+    const headers = new Headers();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
     const res = await fetch(`${API_BASE_URL}/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
       cache: "no-store",
     });
     if (!res.ok) return null;
@@ -50,9 +50,6 @@ async function fetchCurrentUser(token: string): Promise<CurrentUser | null> {
   }
 }
 
-/**
- * 用 refresh token 静默换取新 access token，不经过 requestJson。
- */
 async function silentRefresh(): Promise<string | null> {
   const refreshToken = getRefreshTokenClient();
   if (!refreshToken) return null;
@@ -83,29 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
 
     let token = getAccessTokenClient();
-
-    // access token 不存在时先用 refresh token 静默续期
-    if (!token) {
-      token = await silentRefresh();
-    }
-
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      if (pathname && !isAuthPath(pathname)) {
-        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-      }
-      return;
-    }
-
-    // 用 fetchCurrentUser（直接 fetch，不走 requestJson/handleUnauthorized）验证 token
     let currentUser = await fetchCurrentUser(token);
 
-    // 首次失败时尝试续期后重试
     if (!currentUser) {
       const newToken = await silentRefresh();
       if (newToken) {
-        currentUser = await fetchCurrentUser(newToken);
+        token = newToken;
+        currentUser = await fetchCurrentUser(token);
       }
     }
 
