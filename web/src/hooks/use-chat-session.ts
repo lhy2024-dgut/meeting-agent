@@ -17,6 +17,7 @@ export type ChatMessage = {
 type UseChatSessionOptions = {
   mode: ChatMode;
   meetingId?: number | null;
+  unlockToken?: string | null;
   userId?: number | null;
   enabled?: boolean;
   initialAssistantMessage?: string;
@@ -49,6 +50,7 @@ function readPersistedSession(key: string): PersistedChatSession | null {
 export function useChatSession({
   mode,
   meetingId,
+  unlockToken,
   userId,
   enabled = true,
   initialAssistantMessage,
@@ -123,6 +125,7 @@ export function useChatSession({
             body: JSON.stringify({
               mode,
               meeting_id: mode === "single" ? meetingId ?? undefined : undefined,
+              unlock_token: mode === "single" ? unlockToken ?? undefined : undefined,
             }),
           },
         );
@@ -154,7 +157,7 @@ export function useChatSession({
     return () => {
       active = false;
     };
-  }, [enabled, initialAssistantMessage, meetingId, mode, onBeforeBootstrap, onBootstrapError, refreshToken, storageKey, userId]);
+  }, [enabled, initialAssistantMessage, meetingId, mode, onBeforeBootstrap, onBootstrapError, refreshToken, storageKey, unlockToken, userId]);
 
   useEffect(() => {
     if (

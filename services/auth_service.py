@@ -31,16 +31,33 @@ def validate_password_strength(password: str) -> None:
         raise AuthError("Password must contain at least one digit")
 
 
-def _build_token(user_id: int, token_version: int, token_type: str, expire_days: int) -> str:
+def _build_token_delta(
+    user_id: int,
+    token_version: int,
+    token_type: str,
+    expires_delta: timedelta,
+    extra: dict | None = None,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "ver": token_version,
         "type": token_type,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(days=expire_days)).timestamp()),
+        "exp": int((now + expires_delta).timestamp()),
     }
+    if extra:
+        payload.update(extra)
     return jwt.encode(payload, config.JWT_SECRET_KEY, algorithm=config.JWT_ALGORITHM)
+
+
+def _build_token(user_id: int, token_version: int, token_type: str, expire_days: int) -> str:
+    return _build_token_delta(
+        user_id,
+        token_version,
+        token_type,
+        timedelta(days=expire_days),
+    )
 
 
 def create_access_token(user_id: int, token_version: int = 0) -> str:
@@ -49,6 +66,21 @@ def create_access_token(user_id: int, token_version: int = 0) -> str:
 
 def create_refresh_token(user_id: int, token_version: int = 0) -> str:
     return _build_token(user_id, token_version, "refresh", config.REFRESH_TOKEN_EXPIRE_DAYS)
+
+
+def create_meeting_unlock_token(
+    user_id: int,
+    meeting_id: int,
+    token_version: int = 0,
+    expires_minutes: int = 30,
+) -> str:
+    return _build_token_delta(
+        user_id,
+        token_version,
+        "meeting_unlock",
+        timedelta(minutes=expires_minutes),
+        {"meeting_id": int(meeting_id)},
+    )
 
 
 def decode_token(token: str, expected_type: str | None = None) -> dict:

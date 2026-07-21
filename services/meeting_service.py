@@ -1,5 +1,6 @@
 ﻿import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -72,12 +73,13 @@ class MeetingService:
         asr_model=ASR_MODEL_WHISPER,
         terms=None,
         chunk_strategy=None,
+        is_private=False,
     ):
         """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
         cached = self.db.get_meeting_by_hash(file_hash, user_id=user_id)
         if not terms and cached and any(
             [cached.minutes_text, cached.action_items_text, cached.resolutions_text]
-        ):
+        ) and bool(cached.is_private) == bool(is_private):
             return self._handle_cache_hit(cached, output_format, template_path, progress_callback)
 
         engine = self._get_engine(asr_model)
@@ -102,6 +104,8 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            diarize_audio=True,
+            is_private=is_private,
         )
 
     def process_stream(
@@ -120,6 +124,7 @@ class MeetingService:
         terms=None,
         chunk_strategy=None,
         transcription_mode="auto",
+        is_private=False,
     ):
         """流式处理：边转写边返回结果。"""
         engine = self._get_engine(asr_model)
@@ -189,6 +194,8 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            diarize_audio=True,
+            is_private=is_private,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -214,6 +221,7 @@ class MeetingService:
         custom_headings=None,
         terms=None,
         chunk_strategy=None,
+        is_private=False,
     ):
         """使用实时录音阶段已经累计好的转写结果生成会议纪要。"""
         transcript = " ".join(seg.get("text", "") for seg in segments)
@@ -233,6 +241,7 @@ class MeetingService:
             chunk_strategy=chunk_strategy,
             asr_model="realtime-browser",
             user_id=user_id,
+            is_private=is_private,
         )
 
     def _handle_cache_hit(self, cached, output_format, template_path, progress_callback):
@@ -301,8 +310,15 @@ class MeetingService:
         chunk_strategy=None,
         asr_model=None,
         user_id=None,
+        diarize_audio=False,
+        is_private=False,
     ):
-        """Steps 3-7: 分类 -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。"""
+        """Steps 3-7: 分类 -> (说话人识别) -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。
+
+        diarize_audio=True 时（上传/普通处理），在保存前对原始音频运行离线说话人
+        识别，用带说话人标签的分句替换落库/展示用的 segments；会议纪要仍使用传入的
+        ASR transcript，不受影响。实时流程传入的 segments 已含 speaker，无需重复识别。
+        """
         if progress_callback:
             progress_callback(55, "📊 分析会议特征...")
         duration = max((seg.get("end", 0) for seg in segments), default=0)
@@ -315,6 +331,7 @@ class MeetingService:
             file_hash,
             user_id=user_id,
             created_at=meeting_dt,
+            is_private=is_private,
         )
 
         if terms:
@@ -326,7 +343,8 @@ class MeetingService:
         if progress_callback:
             progress_callback(65, "🤖 生成会议纪要...")
         date_str = meeting_dt.strftime("%Y-%m-%d %H:%M")
-        action_items, resolutions, minutes = self.minutes_chain.run(
+        # 纪要、待办、决议、摘要、项目名在同一次 LLM 调用中一并产出
+        action_items, resolutions, minutes, short_summary, project_name = self.minutes_chain.run(
             transcript,
             title=title,
             date=date_str,
@@ -358,13 +376,15 @@ class MeetingService:
             action_items = PLACEHOLDER_NO_ACTION
         if not (resolutions or "").strip():
             resolutions = PLACEHOLDER_NO_RESOLUTION
-
-        if progress_callback:
-            progress_callback(72, "📝 生成摘要...")
-        short_summary, project_name = self._generate_summary(transcript, minutes)
+        if not (short_summary or "").strip():
+            short_summary = (minutes or "")[:200]
+        if not (project_name or "").strip():
+            project_name = "未分类"
 
         if progress_callback:
             progress_callback(80, "💾 保存结果...")
+        # 先保存不带说话人的转录，纪要立即可用；说话人识别改为后台异步执行，
+        # 完成后再用带说话人标签的分句覆盖转录（用户刷新详情页即可看到）。
         self.db.add_transcriptions_bulk(meeting_id, segments, user_id=user_id)
         self.db.update_meeting_results(
             meeting_id,
@@ -404,6 +424,10 @@ class MeetingService:
         }
         output_path = self.export_chain.run(output_data, output_format, template_path)
 
+        # 后台异步说话人识别：不阻塞纪要生成，完成后覆盖转录的说话人标签
+        if diarize_audio and file_path:
+            self._spawn_diarization(meeting_id, file_path, user_id)
+
         if progress_callback:
             progress_callback(100, "OK 完成")
 
@@ -421,6 +445,95 @@ class MeetingService:
             "duration_category": duration_category,
             "environment": environment,
         }
+
+    @staticmethod
+    def _diarize_segments(audio_path, fallback):
+        """对原始音频运行离线说话人识别，返回带 speaker 标签的分句列表。
+
+        复用与实时转写一致的 speaker_service（paraformer-zh + fsmn-vad + ct-punc + cam++）。
+        识别失败或无结果时回退到传入的 fallback segments（不带说话人），不阻断主流程。
+        """
+        try:
+            from services.realtime_speaker_service import speaker_service
+
+            spk_segments = speaker_service.diarize(audio_path)
+        except Exception as exc:
+            logger.warning("说话人识别失败，回退无说话人转录: %s", exc)
+            return fallback
+
+        if not spk_segments:
+            logger.warning("说话人识别无结果，回退无说话人转录")
+            return fallback
+
+        return [
+            {
+                "text": item.get("text", ""),
+                "start": item.get("start", 0.0),
+                "end": item.get("end", 0.0),
+                "speaker": item.get("spk", ""),
+            }
+            for item in spk_segments
+        ]
+
+    @staticmethod
+    def _throttle_current_thread_cpu():
+        """给后台说话人识别限速：限制 torch 线程数并降低本线程优先级，
+        避免 cam++ 全量推理占满 CPU、饿死正在服务的 Web 请求（如登录）。
+
+        - torch 线程限制为「总核数-2」（至少 1），给请求服务留出核心；
+        - Windows 下把当前后台线程优先级降到 LOWEST，让请求线程优先被调度。
+        全部为尽力而为，失败不影响识别本身。
+        """
+        import os
+
+        reserve = max(1, (os.cpu_count() or 4) - 2)
+        try:
+            import torch
+
+            torch.set_num_threads(reserve)
+        except Exception:
+            pass
+        try:
+            os.environ.setdefault("OMP_NUM_THREADS", str(reserve))
+        except Exception:
+            pass
+        try:
+            import ctypes
+
+            THREAD_PRIORITY_LOWEST = -2
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetThreadPriority(
+                kernel32.GetCurrentThread(), THREAD_PRIORITY_LOWEST
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _spawn_diarization(meeting_id, audio_path, user_id):
+        """后台线程执行说话人识别，完成后用带说话人标签的分句覆盖该会议的转录。
+
+        不阻塞纪要生成主流程；失败或无结果时保留原始（无说话人）转录。
+        用独立的 MeetingRepository，避免与主线程共享 session。
+        识别前先对本线程做 CPU 限速，避免占满 CPU 影响 Web 请求响应。
+        """
+        def worker():
+            try:
+                MeetingService._throttle_current_thread_cpu()
+                diarized = MeetingService._diarize_segments(audio_path, fallback=None)
+                if not diarized:
+                    return
+                from db.repository import MeetingRepository
+
+                MeetingRepository().replace_transcriptions(
+                    meeting_id, diarized, user_id=user_id
+                )
+                logger.info("后台说话人识别完成并更新转录: meeting=%s", meeting_id)
+            except Exception as exc:
+                logger.warning("后台说话人识别失败: meeting=%s err=%s", meeting_id, exc)
+
+        threading.Thread(
+            target=worker, daemon=True, name=f"diarize-{meeting_id}"
+        ).start()
 
     @staticmethod
     def _generate_summary(transcript, minutes):

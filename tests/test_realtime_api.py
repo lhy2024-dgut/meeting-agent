@@ -35,9 +35,24 @@ def test_realtime_session_chunk_dedup_and_cleanup(tmp_path, monkeypatch):
         _write_wav(out, duration_seconds=1.25)
         return str(out)
 
-    class FakeEngine:
-        def transcribe(self, _file_path, terms=None):
-            return ([{"start": 0.0, "end": 1.25, "text": "测试分片"}], None)
+    class FakeRealtimeService:
+        def ensure_streaming_ready(self):
+            return None
+
+        def ensure_punctuation_ready(self):
+            return None
+
+        def create_stream_state(self):
+            return {}
+
+        def feed_stream_pcm(self, _state, _pcm):
+            return "测试分片"
+
+        def finalize_stream(self, _state):
+            return ""
+
+        def apply_punctuation_text(self, text):
+            return text
 
     monkeypatch.setattr(
         "api.services.realtime_session_manager.convert_audio_to_wav",
@@ -48,8 +63,8 @@ def test_realtime_session_chunk_dedup_and_cleanup(tmp_path, monkeypatch):
         lambda _path: 1.25,
     )
     monkeypatch.setattr(
-        "services.meeting_service.MeetingService._get_engine",
-        lambda self, _asr_model: FakeEngine(),
+        "api.services.realtime_session_manager.get_realtime_service",
+        lambda: FakeRealtimeService(),
     )
 
     created = client.post(

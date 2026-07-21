@@ -11,8 +11,26 @@ from api.schemas.chat import (
 )
 from api.services.chat_session_manager import chat_session_manager
 from db.repository import MeetingRepository
+from services.auth_service import decode_token
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def _require_private_unlock(meeting, current_user, unlock_token: str | None) -> None:
+    if not bool(getattr(meeting, "is_private", False)):
+        return
+    if not unlock_token:
+        raise HTTPException(status_code=403, detail="Meeting unlock required")
+    try:
+        payload = decode_token(unlock_token, expected_type="meeting_unlock")
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail="Invalid meeting unlock token") from exc
+    if int(payload.get("sub", 0)) != int(current_user.id):
+        raise HTTPException(status_code=403, detail="Invalid meeting unlock token")
+    if int(payload.get("meeting_id", 0)) != int(meeting.id):
+        raise HTTPException(status_code=403, detail="Invalid meeting unlock token")
+    if payload.get("ver") != (current_user.token_version or 0):
+        raise HTTPException(status_code=403, detail="Invalid meeting unlock token")
 
 
 @router.post("/sessions", response_model=ChatSessionCreateResponse)
@@ -38,12 +56,17 @@ def create_chat_session(
         meeting = repo.get_meeting_by_id(meeting_id, user_id=current_user.id)
         if not meeting:
             raise HTTPException(status_code=404, detail="Meeting not found")
+        _require_private_unlock(meeting, current_user, payload.unlock_token)
         transcript = " ".join(item.text or "" for item in meeting.transcriptions)
         minutes = meeting.minutes_text or ""
         action_items = meeting.action_items_text or ""
         resolutions = meeting.resolutions_text or ""
     else:
-        meeting_ids = repo.list_meeting_ids_for_user(current_user.id)
+        meeting_ids = [
+            item.id
+            for item in repo.get_all_meetings(user_id=current_user.id)
+            if not bool(getattr(item, "is_private", False))
+        ]
 
     session = chat_session_manager.create_session(
         user_id=current_user.id,

@@ -81,7 +81,7 @@ def test_minutes_chain_retries_when_minutes_body_is_too_short(monkeypatch):
     )
 
     chain = MinutesChain(llm=RunnableLambda(lambda _: next(outputs)))
-    action_items, resolutions, minutes = chain.run(
+    action_items, resolutions, minutes, _short_summary, _project_name = chain.run(
         "这是一个很长的会议转录。" * 120,
         title="测试会议",
         date="2026-06-21 23:50",

@@ -361,7 +361,7 @@ class RealtimeSessionManager:
             )
         return session
 
-    def generate_meeting(self, session_id: str) -> dict[str, object]:
+    def generate_meeting(self, session_id: str, is_private: bool = False) -> dict[str, object]:
         # 尽早标记 generating：cleanup_session(force=False) 遇到 generating 会拒绝删除，
         # 防止前端卸载/轮询触发的 DELETE 在生成期间删掉会话目录（含 recording.wav）。
         session = self._require_session(session_id)
@@ -392,6 +392,7 @@ class RealtimeSessionManager:
                 output_format=session.output_format,
                 scene=session.scene,
                 terms=session.terms or None,
+                is_private=is_private,
             )
         finally:
             self.cleanup_session(session_id, force=True)

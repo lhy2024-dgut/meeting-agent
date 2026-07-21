@@ -16,6 +16,7 @@ import {
   MeetingEmailSendResponse,
   MeetingDetail,
   MeetingListResponse,
+  MeetingMeta,
   MeetingMutationResponse,
   MeetingTermsResponse,
   RealtimeSessionCreateRequest,
@@ -89,6 +90,40 @@ export class ApiError extends Error {
 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
+}
+
+function withUnlockToken(path: string, unlockToken?: string | null): string {
+  if (!unlockToken) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}unlock_token=${encodeURIComponent(unlockToken)}`;
+}
+
+/**
+ * 取会议原始录音，返回可直接用于 <audio src> 的 object URL。
+ *
+ * 后端音频端点用 Bearer token 鉴权，<audio> 标签无法携带该请求头，
+ * 因此这里用已鉴权的 fetch 取回整段 blob 再转成 object URL。调用方在卸载时
+ * 需 URL.revokeObjectURL() 释放。
+ */
+export async function fetchMeetingAudioObjectUrl(
+  meetingId: number,
+  unlockToken?: string | null,
+): Promise<string> {
+  const token = await getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}${withUnlockToken(`/meetings/${meetingId}/audio`, unlockToken)}`,
+    {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError({
+      message: `无法加载录音（${response.status}）`,
+      status: response.status,
+    });
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 async function resolveHeaders(initHeaders?: HeadersInit): Promise<Headers> {
@@ -466,9 +501,14 @@ export function logoutUser(options?: ApiRequestOptions): Promise<MeetingMutation
 
 export function getMeeting(
   meetingId: string | number,
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<MeetingDetail> {
-  return requestJson<MeetingDetail>(`/meetings/${meetingId}`, {}, options);
+  return requestJson<MeetingDetail>(
+    withUnlockToken(`/meetings/${meetingId}`, unlockToken),
+    {},
+    options,
+  );
 }
 
 export function updateMeetingProjectName(
@@ -504,18 +544,24 @@ export function deleteMeeting(
 
 export function getMeetingTerms(
   meetingId: string | number,
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<MeetingTermsResponse> {
-  return requestJson<MeetingTermsResponse>(`/meetings/${meetingId}/terms`, {}, options);
+  return requestJson<MeetingTermsResponse>(
+    withUnlockToken(`/meetings/${meetingId}/terms`, unlockToken),
+    {},
+    options,
+  );
 }
 
 export function regenerateMeeting(
   meetingId: string | number,
   payload: { terms?: string[] },
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<CreateJobResponse> {
   return requestJson<CreateJobResponse>(
-    `/meetings/${meetingId}/regenerate`,
+    withUnlockToken(`/meetings/${meetingId}/regenerate`, unlockToken),
     {
       method: "POST",
       headers: {
@@ -529,9 +575,37 @@ export function regenerateMeeting(
 
 export function getTranscript(
   meetingId: string | number,
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<TranscriptResponse> {
-  return requestJson<TranscriptResponse>(`/meetings/${meetingId}/transcript`, {}, options);
+  return requestJson<TranscriptResponse>(
+    withUnlockToken(`/meetings/${meetingId}/transcript`, unlockToken),
+    {},
+    options,
+  );
+}
+
+export function getMeetingMeta(
+  meetingId: string | number,
+  options?: ApiRequestOptions,
+): Promise<MeetingMeta> {
+  return requestJson<MeetingMeta>(`/meetings/${meetingId}/meta`, {}, options);
+}
+
+export function verifyPassword(
+  password: string,
+  meetingId?: number,
+  options?: ApiRequestOptions,
+): Promise<{ valid: boolean; unlock_token?: string | null }> {
+  return requestJson<{ valid: boolean; unlock_token?: string | null }>(
+    "/auth/password/verify",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password, meeting_id: meetingId }),
+    },
+    options,
+  );
 }
 
 export function getStatsOverview(options?: ApiRequestOptions): Promise<StatsOverviewResponse> {
@@ -812,18 +886,24 @@ export function getJob(
 
 export function getHtmlSummary(
   meetingId: string | number,
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<HtmlSummaryResponse> {
-  return requestJson<HtmlSummaryResponse>(`/meetings/${meetingId}/html-summary`, {}, options);
+  return requestJson<HtmlSummaryResponse>(
+    withUnlockToken(`/meetings/${meetingId}/html-summary`, unlockToken),
+    {},
+    options,
+  );
 }
 
 export function generateHtmlSummary(
   meetingId: string | number,
   payload: HtmlSummaryGenerateRequest,
+  unlockToken?: string | null,
   options?: ApiRequestOptions,
 ): Promise<HtmlSummaryResponse> {
   return requestJson<HtmlSummaryResponse>(
-    `/meetings/${meetingId}/html-summary/generate`,
+    withUnlockToken(`/meetings/${meetingId}/html-summary/generate`, unlockToken),
     {
       method: "POST",
       headers: {
@@ -842,6 +922,7 @@ export function createChatSession(
   payload: {
     mode: "single" | "cross";
     meeting_id?: number;
+    unlock_token?: string | null;
   },
   options?: ApiRequestOptions,
 ): Promise<ChatSessionCreateResponse> {
@@ -957,12 +1038,15 @@ export function diarizeRealtimeSession(
 
 export function createRealtimeGenerateJob(
   sessionId: string,
+  isPrivate: boolean,
   options?: ApiRequestOptions,
 ): Promise<CreateJobResponse> {
   return requestJson<CreateJobResponse>(
     `/realtime/sessions/${sessionId}/generate`,
     {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_private: isPrivate }),
     },
     options,
   );

@@ -6,14 +6,16 @@ import { getApiBaseUrl } from "@/lib/api";
 
 type MeetingActionsProps = {
   meetingId: number;
+  unlockToken?: string | null;
 };
 
-export function MeetingActions({ meetingId }: MeetingActionsProps) {
+export function MeetingActions({ meetingId, unlockToken = null }: MeetingActionsProps) {
   const [format, setFormat] = useState("docx");
   const downloadHref = useMemo(() => {
     const params = new URLSearchParams({ format });
+    if (unlockToken) params.set("unlock_token", unlockToken);
     return `${getApiBaseUrl()}/meetings/${meetingId}/exports/download?${params.toString()}`;
-  }, [format, meetingId]);
+  }, [format, meetingId, unlockToken]);
 
   return (
     <div className="flex flex-wrap items-center gap-3">

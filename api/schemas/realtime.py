@@ -21,6 +21,10 @@ class RealtimeSessionCreateRequest(BaseModel):
     terms: list[str] = []
 
 
+class RealtimeGenerateRequest(BaseModel):
+    is_private: bool = False
+
+
 class RealtimeSessionResponse(BaseModel):
     session_id: str
     title: str

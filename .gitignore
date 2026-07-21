@@ -47,3 +47,25 @@ meeting_7.pdf
 # 测试音频
 *.mp3
 *.wav
+
+# 第三方供应目录（本地依赖，不进版本）
+FunASR/
+
+# 个人周报 / 阶段文档（不进版本）
+Week*.md
+week*.md
+第*周*.md
+第*周*.md
+结项*.md
+版本规划*.md
+学习总结.md
+学习*.md
+论文*.md
+论文调研.md
+ASR_Chunk_调研报告.md
+实时转写调研报告.md
+本项目简历.md
+纪要.md
+配环境教程.md
+配置发送邮箱教程.md
+image/

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 class ChatSessionCreateRequest(BaseModel):
     mode: str = "single"
     meeting_id: int | None = None
+    unlock_token: str | None = None
 
 
 class ChatSessionCreateResponse(BaseModel):

@@ -9,6 +9,7 @@ type MeetingEmailPanelProps = {
   meetingId: number;
   meetingTitle: string;
   dateText: string;
+  unlockToken?: string | null;
 };
 
 type RecipientMode = "contacts" | "groups";
@@ -17,6 +18,7 @@ export function MeetingEmailPanel({
   meetingId,
   meetingTitle,
   dateText,
+  unlockToken = null,
 }: MeetingEmailPanelProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<ContactGroup[]>([]);
@@ -54,6 +56,16 @@ export function MeetingEmailPanel({
     );
   }, [contacts, groups, recipientMode, selectedContactIds, selectedGroupIds]);
 
+  const meetingPath = useCallback(
+    (suffix: string) => {
+      const path = `/meetings/${meetingId}${suffix}`;
+      if (!unlockToken) return path;
+      const separator = path.includes("?") ? "&" : "?";
+      return `${path}${separator}unlock_token=${encodeURIComponent(unlockToken)}`;
+    },
+    [meetingId, unlockToken],
+  );
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -61,7 +73,7 @@ export function MeetingEmailPanel({
       const [contactResponse, groupResponse, logResponse] = await Promise.all([
         requestBrowserJson<{ items: Contact[] }>("/contacts"),
         requestBrowserJson<{ items: ContactGroup[] }>("/contact-groups"),
-        requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`),
+        requestBrowserJson<{ items: EmailLog[] }>(meetingPath("/email-logs")),
       ]);
       setContacts(contactResponse.items);
       setGroups(groupResponse.items);
@@ -71,7 +83,17 @@ export function MeetingEmailPanel({
     } finally {
       setLoading(false);
     }
-  }, [meetingId]);
+  }, [meetingPath]);
+
+  const checkHtmlSummary = useCallback(async () => {
+    try {
+      await requestBrowserJson<{ html: string }>(meetingPath("/html-summary"));
+      setHtmlSummaryAvailable(true);
+    } catch {
+      setHtmlSummaryAvailable(false);
+      setAttachHtmlSummary(false);
+    }
+  }, [meetingPath]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -79,19 +101,7 @@ export function MeetingEmailPanel({
       void checkHtmlSummary();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadData]);
-
-  // 由父页面通过 prop 或 HtmlSummaryPanel 通知是否已生成，
-  // 避免在此重复发起 html-summary 请求造成不必要的 401 噪音。
-  async function checkHtmlSummary() {
-    try {
-      await requestBrowserJson<{ html: string }>(`/meetings/${meetingId}/html-summary`);
-      setHtmlSummaryAvailable(true);
-    } catch {
-      setHtmlSummaryAvailable(false);
-      setAttachHtmlSummary(false);
-    }
-  }
+  }, [checkHtmlSummary, loadData]);
 
   async function handleSend() {
     if (!subject.trim()) {
@@ -107,7 +117,7 @@ export function MeetingEmailPanel({
     setError("");
     setResult(null);
     try {
-      const response = await requestBrowserJson<MeetingEmailSendResponse>(`/meetings/${meetingId}/emails/send`, {
+      const response = await requestBrowserJson<MeetingEmailSendResponse>(meetingPath("/emails/send"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -121,7 +131,7 @@ export function MeetingEmailPanel({
         }),
       });
       setResult(response);
-      const logsResponse = await requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`);
+      const logsResponse = await requestBrowserJson<{ items: EmailLog[] }>(meetingPath("/email-logs"));
       setLogs(logsResponse.items);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "邮件发送失败");

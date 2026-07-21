@@ -48,6 +48,16 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str
+    meeting_id: int | None = None
+
+
+class VerifyPasswordResponse(BaseModel):
+    valid: bool
+    unlock_token: str | None = None
+
+
 class UserSmtpSettingsResponse(BaseModel):
     smtp_host: str
     smtp_port: int

@@ -11,6 +11,14 @@ export type MeetingSummary = {
   project_name: string;
   action_item_count: number;
   resolution_count: number;
+  is_private: boolean;
+};
+
+export type MeetingMeta = {
+  id: number;
+  title: string;
+  date_text: string;
+  is_private: boolean;
 };
 
 export type MeetingListResponse = {
@@ -183,6 +191,7 @@ export type MeetingDetail = {
   action_item_count: number;
   resolution_count: number;
   transcript_count: number;
+  is_private: boolean;
   todos: TodoItem[];
 };
 
@@ -192,6 +201,7 @@ export type TranscriptSegment = {
   timestamp: number;
   start_time: number;
   end_time: number;
+  speaker: string;
 };
 
 export type TranscriptResponse = {
@@ -299,6 +309,12 @@ export type ChatSessionCreateResponse = {
   session_id: string;
   mode: string;
   meeting_id: number | null;
+};
+
+export type ChatSessionCreateRequest = {
+  mode: "single" | "cross";
+  meeting_id?: number;
+  unlock_token?: string | null;
 };
 
 export type ChatMemoryStats = {

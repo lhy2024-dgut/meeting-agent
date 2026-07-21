@@ -364,7 +364,8 @@ class MinutesChain:
             custom_headings: 用户自定义一级标题列表，非空时覆盖场景默认标题。
 
         Returns:
-            (action_items, resolutions, minutes) 三元组，minutes 为完整纪要文档。
+            (action_items, resolutions, minutes, short_summary, project_name) 五元组。
+            short_summary/project_name 与纪要在同一次 LLM 调用中一并产出。
         """
         transcript = transcript or ""
         custom_headings = custom_headings or []
@@ -394,6 +395,8 @@ class MinutesChain:
         action_items = ""
         resolutions = ""
         minutes = ""
+        short_summary = ""
+        project_name = ""
 
         for attempt in range(self.MAX_RETRY + 1):
             try:
@@ -411,6 +414,8 @@ class MinutesChain:
                 body = parsed.get("minutes", "")
                 action_items = parsed.get("todos", "")
                 resolutions = parsed.get("decisions", "")
+                short_summary = str(parsed.get("short_summary", "")).strip()[:200]
+                project_name = str(parsed.get("project_name", "")).strip()[:20]
                 minutes = _format_minutes_document(title, date, topic, body)
                 minutes_usable = _has_meaningful_minutes_content(
                     minutes,
@@ -444,7 +449,13 @@ class MinutesChain:
             action_items = "本次会议未明确待办事项。"
             resolutions = "本次会议未明确决议。"
 
-        result = (action_items, resolutions, minutes)
+        # 摘要字段兜底：LLM 未产出时用纪要正文截断 / 默认项目名
+        if not short_summary:
+            short_summary = (minutes or "")[:200]
+        if not project_name:
+            project_name = "未分类"
+
+        result = (action_items, resolutions, minutes, short_summary, project_name)
         self._cache[key] = result
         if len(self._cache) > self._max_cache:
             self._cache.popitem(last=False)

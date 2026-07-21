@@ -9,9 +9,12 @@ const SUGGESTIONS = [
   "\u8c01\u8d1f\u8d23\u54ea\u4e9b\u4efb\u52a1\uff1f",
 ];
 
-type MeetingChatProps = { meetingId: number; };
+type MeetingChatProps = {
+  meetingId: number;
+  unlockToken?: string | null;
+};
 
-export function MeetingChat({ meetingId }: MeetingChatProps) {
+export function MeetingChat({ meetingId, unlockToken = null }: MeetingChatProps) {
   const { user } = useAuth();
   const {
     sessionId,
@@ -26,6 +29,7 @@ export function MeetingChat({ meetingId }: MeetingChatProps) {
   } = useChatSession({
     mode: "single",
     meetingId,
+    unlockToken,
     userId: user?.id,
   });
 
