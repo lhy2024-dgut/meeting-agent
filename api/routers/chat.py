@@ -1,4 +1,3 @@
-import config
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.deps import get_current_user, get_meeting_repository
@@ -72,7 +71,7 @@ def send_chat_message(
     session = chat_session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    if not config.SINGLE_ACCOUNT_MODE and session.user_id != current_user.id:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Chat session does not belong to the current user")
 
     validation_error = session.agent.validate_input(payload.message)

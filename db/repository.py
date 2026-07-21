@@ -47,13 +47,13 @@ class MeetingRepository:
 
     @staticmethod
     def _apply_user_filter(query, user_id):
-        if user_id is None or config.SINGLE_ACCOUNT_MODE:
+        if user_id is None:
             return query
         return query.filter(Meeting.user_id == user_id)
 
     @staticmethod
     def _apply_owner_filter(query, column, user_id):
-        if user_id is None or config.SINGLE_ACCOUNT_MODE:
+        if user_id is None:
             return query
         return query.filter(column == user_id)
 
@@ -264,7 +264,7 @@ class MeetingRepository:
                 }
             )
         with self._write_session() as session:
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 meeting = (
                     session.query(Meeting.id)
                     .filter(Meeting.id == meeting_id, Meeting.user_id == user_id)
@@ -277,7 +277,7 @@ class MeetingRepository:
     def replace_transcriptions(self, meeting_id, segments, user_id=None):
         with self._write_session() as session:
             query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 query = query.filter(Meeting.user_id == user_id)
             if not query.first():
                 return
@@ -379,7 +379,7 @@ class MeetingRepository:
                     0,
                 ).label("overdue_todos"),
             )
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 todo_summary_query = todo_summary_query.filter(TodoItem.user_id == user_id)
             todo_summary = todo_summary_query.one()
 
@@ -387,7 +387,7 @@ class MeetingRepository:
                 func.coalesce(TodoItem.assignee, "未指定").label("key"),
                 func.count(TodoItem.id).label("count"),
             ).filter(TodoItem.status != "cancelled")
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 assignee_query = assignee_query.filter(TodoItem.user_id == user_id)
             assignee_rows = (
                 assignee_query.group_by(func.coalesce(TodoItem.assignee, "未指定"))
@@ -506,7 +506,7 @@ class MeetingRepository:
                 select_fields.insert(1, "user_id")
             sql = f"SELECT {', '.join(select_fields)} FROM meetings"
             params = {}
-            if user_id is not None and "user_id" in cols and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None and "user_id" in cols:
                 sql += " WHERE user_id = :user_id"
                 params["user_id"] = user_id
             sql += " ORDER BY created_at DESC"
@@ -788,7 +788,7 @@ class MeetingRepository:
     ):
         with self._write_session() as session:
             meeting_query = session.query(Meeting.id).filter(Meeting.id == meeting_id)
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 meeting_query = meeting_query.filter(Meeting.user_id == user_id)
             if not meeting_query.first():
                 return None
@@ -811,6 +811,6 @@ class MeetingRepository:
                 .join(Meeting, Meeting.id == EmailLog.meeting_id)
                 .filter(EmailLog.meeting_id == meeting_id)
             )
-            if user_id is not None and not config.SINGLE_ACCOUNT_MODE:
+            if user_id is not None:
                 query = query.filter(Meeting.user_id == user_id)
             return query.order_by(EmailLog.sent_at.desc(), EmailLog.id.desc()).all()

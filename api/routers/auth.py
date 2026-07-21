@@ -1,6 +1,5 @@
 import re
 
-import config
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.deps import get_current_user, get_meeting_repository
@@ -39,10 +38,6 @@ from services.email_service import (
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def _get_single_account_user(repo: MeetingRepository):
-    return repo.get_or_create_default_user()
 
 
 def _serialize_user(user) -> CurrentUserResponse:
@@ -111,9 +106,6 @@ def register(
     payload: RegisterRequest,
     repo: MeetingRepository = Depends(get_meeting_repository),
 ) -> CurrentUserResponse:
-    if config.SINGLE_ACCOUNT_MODE:
-        raise HTTPException(status_code=409, detail="Registration is disabled in single-account mode")
-
     username = payload.username.strip()
     email = payload.email.strip().lower()
     display_name = (payload.display_name or "").strip()
@@ -143,14 +135,10 @@ def login(
     payload: LoginRequest,
     repo: MeetingRepository = Depends(get_meeting_repository),
 ) -> TokenResponse:
-    if config.SINGLE_ACCOUNT_MODE:
-        user = _get_single_account_user(repo)
-        repo.update_user_last_login(user.id)
-    else:
-        try:
-            user = authenticate_user(repo, payload.login, payload.password)
-        except AuthError as exc:
-            raise HTTPException(status_code=401, detail=str(exc)) from exc
+    try:
+        user = authenticate_user(repo, payload.login, payload.password)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     return TokenResponse(
         access_token=create_access_token(user.id, user.token_version or 0),
@@ -163,13 +151,6 @@ def refresh_token(
     payload: RefreshTokenRequest,
     repo: MeetingRepository = Depends(get_meeting_repository),
 ) -> TokenResponse:
-    if config.SINGLE_ACCOUNT_MODE:
-        user = _get_single_account_user(repo)
-        return TokenResponse(
-            access_token=create_access_token(user.id, user.token_version or 0),
-            refresh_token=create_refresh_token(user.id, user.token_version or 0),
-        )
-
     try:
         token_payload = decode_token(payload.refresh_token, expected_type="refresh")
         user_id = int(token_payload["sub"])
@@ -193,9 +174,6 @@ def logout(
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> AuthMutationResponse:
-    if config.SINGLE_ACCOUNT_MODE:
-        return AuthMutationResponse(success=True)
-
     if not repo.invalidate_user_tokens(current_user.id):
         raise HTTPException(status_code=404, detail="User not found")
     return AuthMutationResponse(success=True)

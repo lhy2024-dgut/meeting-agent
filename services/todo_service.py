@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from datetime import datetime
 import re
 
-import config
 from sqlalchemy.orm import selectinload
 
 from db.models import Meeting, TodoItem, TodoStatusLog
@@ -140,8 +139,6 @@ class TodoService:
 
     @staticmethod
     def _apply_user_filter(query, column, user_id: int):
-        if config.SINGLE_ACCOUNT_MODE:
-            return query
         return query.filter(column == user_id)
 
     def list_todos(

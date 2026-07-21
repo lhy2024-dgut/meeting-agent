@@ -18,49 +18,12 @@ def _build_repo(tmp_path: Path) -> MeetingRepository:
     return repo
 
 
-def _build_client(repo: MeetingRepository) -> TestClient:
+def test_register_login_refresh_and_me(tmp_path):
+    repo = _build_repo(tmp_path)
     app = FastAPI()
     app.include_router(auth.router)
     app.dependency_overrides[get_meeting_repository] = lambda: repo
-    return TestClient(app)
-
-
-def test_single_account_me_works_without_token(tmp_path):
-    repo = _build_repo(tmp_path)
-    client = _build_client(repo)
-
-    response = client.get("/api/auth/me")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["username"] == "admin"
-    assert body["email"] == "admin@example.com"
-
-
-def test_single_account_login_and_refresh_return_default_user_tokens(tmp_path):
-    repo = _build_repo(tmp_path)
-    client = _build_client(repo)
-
-    login = client.post(
-        "/api/auth/login",
-        json={"login": "anything", "password": "anything"},
-    )
-    assert login.status_code == 200
-    tokens = login.json()
-    assert tokens["access_token"]
-    assert tokens["refresh_token"]
-
-    refreshed = client.post(
-        "/api/auth/refresh",
-        json={"refresh_token": "stale-or-missing-token"},
-    )
-    assert refreshed.status_code == 200
-    assert refreshed.json()["access_token"]
-
-
-def test_single_account_disables_registration_and_logout_is_idempotent(tmp_path):
-    repo = _build_repo(tmp_path)
-    client = _build_client(repo)
+    client = TestClient(app)
 
     registered = client.post(
         "/api/auth/register",
@@ -68,9 +31,162 @@ def test_single_account_disables_registration_and_logout_is_idempotent(tmp_path)
             "username": "alice",
             "email": "alice@example.com",
             "password": "StrongPass1",
+            "display_name": "Alice",
         },
     )
-    assert registered.status_code == 409
+    assert registered.status_code == 201
+    assert registered.json()["username"] == "alice"
 
-    assert client.post("/api/auth/logout").status_code == 200
-    assert client.get("/api/auth/me").status_code == 200
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "alice", "password": "StrongPass1"},
+    )
+    assert login.status_code == 200
+    tokens = login.json()
+    assert tokens["access_token"]
+    assert tokens["refresh_token"]
+
+    me = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert me.status_code == 200
+    assert me.json()["email"] == "alice@example.com"
+
+    refreshed = client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["access_token"]
+
+
+def test_me_accepts_access_token_cookie(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "cookie-user",
+            "email": "cookie@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "cookie-user", "password": "StrongPass1"},
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+
+    client.cookies.set("meeting_agent_access_token", access_token)
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["username"] == "cookie-user"
+
+
+def test_logout_revokes_access_and_refresh_tokens(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "logout-user",
+            "email": "logout@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "logout-user", "password": "StrongPass1"},
+    )
+    tokens = login.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert client.post("/api/auth/logout", headers=headers).status_code == 200
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    ).status_code == 401
+
+
+def test_password_change_revokes_existing_tokens(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "password-user",
+            "email": "password@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"login": "password-user", "password": "StrongPass1"},
+    )
+    tokens = login.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    changed = client.post(
+        "/api/auth/password",
+        headers=headers,
+        json={"current_password": "StrongPass1", "new_password": "NewStrongPass2"},
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    ).status_code == 401
+
+
+def test_register_rejects_duplicates_and_weak_password(tmp_path):
+    repo = _build_repo(tmp_path)
+    app = FastAPI()
+    app.include_router(auth.router)
+    app.dependency_overrides[get_meeting_repository] = lambda: repo
+    client = TestClient(app)
+
+    first = client.post(
+        "/api/auth/register",
+        json={
+            "username": "bob",
+            "email": "bob@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        "/api/auth/register",
+        json={
+            "username": "bob",
+            "email": "bob2@example.com",
+            "password": "StrongPass1",
+        },
+    )
+    assert duplicate.status_code == 409
+
+    weak = client.post(
+        "/api/auth/register",
+        json={
+            "username": "carol",
+            "email": "carol@example.com",
+            "password": "weak",
+        },
+    )
+    assert weak.status_code == 400

@@ -1,4 +1,3 @@
-import config
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -18,9 +17,6 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     repo: MeetingRepository = Depends(get_meeting_repository),
 ):
-    if config.SINGLE_ACCOUNT_MODE:
-        return repo.get_or_create_default_user()
-
     token = None
     if credentials and credentials.scheme.lower() == "bearer":
         token = credentials.credentials

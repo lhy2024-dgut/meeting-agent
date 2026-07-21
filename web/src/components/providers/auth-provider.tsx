@@ -138,8 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout API errors; local session cleanup is sufficient.
     } finally {
       clearAuthTokens();
-      await refreshUser();
-      router.replace("/");
+      setUser(null);
+      router.replace("/login");
     }
   }
 

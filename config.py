@@ -28,7 +28,6 @@ DATABASE_URL = os.getenv(
 # Auth
 # Never ship a predictable signing key or administrator password. Deployments that
 # need sessions to survive restarts must provide these values through `.env`.
-SINGLE_ACCOUNT_MODE = os.getenv("SINGLE_ACCOUNT_MODE", "true").lower() == "true"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_urlsafe(48)
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7"))
