@@ -38,12 +38,8 @@ import {
   setAuthTokens,
 } from "@/lib/auth";
 
-// 浏览器端走同源相对路径 "/api"（由 Next.js rewrites 代理到后端），避免跨域预检；
-// 服务端渲染（Node）无相对 origin，直连后端绝对地址。
-// 设置 NEXT_PUBLIC_API_BASE_URL 可统一覆盖两者。
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  (typeof window === "undefined" ? "http://127.0.0.1:8000/api" : "/api");
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const CHAT_REQUEST_TIMEOUT_MS = 90_000;
