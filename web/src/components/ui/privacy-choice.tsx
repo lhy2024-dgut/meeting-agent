@@ -11,7 +11,7 @@ type PrivacySelectorProps = {
 export function PrivacySelector({ value, onChange }: PrivacySelectorProps) {
   return (
     <div className="privacy-selector">
-      <div className="privacy-selector-text">
+      <div className="privacy-selector-head">
         <span className="privacy-selector-label">{"是否涉及隐私内容"}</span>
         <span className="privacy-selector-hint">
           {"选择「是」后，之后从历史记录查看该会议需重新输入密码。"}
