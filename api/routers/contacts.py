@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from api.deps import get_current_user, get_meeting_repository
@@ -29,6 +29,7 @@ from chains.html_summary_chain import get_html_summary_path
 from db.repository import MeetingRepository
 from services.email_service import EmailService, build_email_html, check_smtp_config
 from services.email_service import SmtpSettings, get_global_smtp_settings
+from services.privacy_service import MEETING_UNLOCK_TOKEN_TYPE, PrivacyError, validate_unlock_token
 
 router = APIRouter(prefix="/api", tags=["contacts"])
 
@@ -114,6 +115,23 @@ def _resolve_email_service_settings(current_user) -> tuple[SmtpSettings | None, 
     if not smtp_ok:
         return None, smtp_error
     return global_settings, None
+
+
+def _require_private_meeting_access(meeting, current_user, unlock_token: str | None) -> None:
+    if not getattr(meeting, "is_private", False):
+        return
+    if not unlock_token:
+        raise HTTPException(status_code=403, detail="Meeting is private and requires unlock")
+    try:
+        validate_unlock_token(
+            unlock_token,
+            expected_type=MEETING_UNLOCK_TOKEN_TYPE,
+            user_id=current_user.id,
+            token_version=current_user.token_version or 0,
+            meeting_id=meeting.id,
+        )
+    except PrivacyError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.get("/contacts", response_model=ContactListResponse)
@@ -241,12 +259,14 @@ def delete_contact_group(
 @router.get("/meetings/{meeting_id}/email-logs", response_model=EmailLogListResponse)
 def list_meeting_email_logs(
     meeting_id: int,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> EmailLogListResponse:
     meeting = repo.get_meeting_by_id(meeting_id, user_id=current_user.id)
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+    _require_private_meeting_access(meeting, current_user, unlock_token)
     logs = repo.get_email_logs(meeting_id, user_id=current_user.id)
     return EmailLogListResponse(items=[_serialize_email_log(item) for item in logs])
 
@@ -255,12 +275,14 @@ def list_meeting_email_logs(
 def send_meeting_email(
     meeting_id: int,
     payload: MeetingEmailSendRequest,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> MeetingEmailSendResponse:
     meeting = repo.get_meeting_by_id(meeting_id, user_id=current_user.id)
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+    _require_private_meeting_access(meeting, current_user, unlock_token)
 
     smtp_settings, smtp_error = _resolve_email_service_settings(current_user)
     if not smtp_settings:

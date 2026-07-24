@@ -41,6 +41,7 @@ def create_realtime_session(
         scene=payload.scene,
         asr_model=payload.asr_model,
         terms=normalize_terms(payload.terms),
+        is_private=payload.is_private,
     )
     return RealtimeSessionResponse(**realtime_session_manager.serialize(session))
 

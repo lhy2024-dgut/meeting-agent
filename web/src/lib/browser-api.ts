@@ -1,7 +1,7 @@
 "use client";
 
 import { getAccessTokenClient } from "@/lib/auth";
-import { getApiBaseUrl } from "@/lib/api";
+import { ApiError, getApiBaseUrl } from "@/lib/api";
 
 type ApiErrorPayload = {
   detail?: string | string[] | Record<string, unknown>;
@@ -55,8 +55,37 @@ export async function requestBrowserJson<T>(path: string, init: RequestInit = {}
 
   if (!response.ok) {
     const payload = await parseBrowserError(response);
-    throw new Error(formatBrowserError(payload, response.status));
+    throw new ApiError({
+      message: formatBrowserError(payload, response.status),
+      status: response.status,
+      details: payload?.detail,
+    });
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function requestBrowserBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const headers = new Headers(init.headers ?? {});
+  const token = getAccessTokenClient();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers,
+  });
+
+  if (!response.ok) {
+    const payload = await parseBrowserError(response);
+    throw new ApiError({
+      message: formatBrowserError(payload, response.status),
+      status: response.status,
+      details: payload?.detail,
+    });
+  }
+
+  return response.blob();
 }

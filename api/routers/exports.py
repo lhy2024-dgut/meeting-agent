@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from api.deps import get_current_user, get_meeting_repository
 from chains.export_chain import ExportChain
 from db.repository import MeetingRepository
+from services.privacy_service import MEETING_UNLOCK_TOKEN_TYPE, PrivacyError, validate_unlock_token
 
 router = APIRouter(prefix="/api/meetings", tags=["exports"])
 
@@ -17,14 +18,33 @@ def _get_owned_meeting(repo: MeetingRepository, meeting_id: int, user_id: int):
     return meeting
 
 
+def _require_private_meeting_access(meeting, current_user, unlock_token: str | None) -> None:
+    if not getattr(meeting, "is_private", False):
+        return
+    if not unlock_token:
+        raise HTTPException(status_code=403, detail="Meeting is private and requires unlock")
+    try:
+        validate_unlock_token(
+            unlock_token,
+            expected_type=MEETING_UNLOCK_TOKEN_TYPE,
+            user_id=current_user.id,
+            token_version=current_user.token_version or 0,
+            meeting_id=meeting.id,
+        )
+    except PrivacyError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @router.post("/{meeting_id}/exports")
 def create_export(
     meeting_id: int,
     format: str = Query("docx"),
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> dict[str, str]:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_private_meeting_access(meeting, current_user, unlock_token)
     exporter = ExportChain()
     data = {
         "meeting_id": meeting.id,
@@ -42,10 +62,12 @@ def create_export(
 def download_export(
     meeting_id: int,
     format: str = Query("docx"),
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> FileResponse:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_private_meeting_access(meeting, current_user, unlock_token)
     exporter = ExportChain()
     data = {
         "meeting_id": meeting.id,

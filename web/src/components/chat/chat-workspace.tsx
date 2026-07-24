@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { getMeeting, getTranscript } from "@/lib/api";
+import { ApiError, getMeeting, getTranscript } from "@/lib/api";
 import { formatMeetingListDate } from "@/lib/format";
 import { buildSourceLocatorSnippet, resolveSourcePreview } from "@/lib/source-target";
 import { useChatSession } from "@/hooks/use-chat-session";
@@ -17,8 +17,16 @@ import {
 } from "@/types/api";
 import { Card, EmptyState } from "@/components/ui/cards";
 import { Pill } from "@/components/ui/pills";
+import { PrivacyUnlockForm } from "@/components/privacy/privacy-unlock-form";
+import { PrivacyUnlockResponse } from "@/types/api";
 
 type ChatMode = "single" | "cross";
+type CrossPrivacyScope = "public_only" | "all";
+
+type UnlockGrant = {
+  token: string;
+  expiresAt: string;
+};
 
 const SUGGESTIONS = ["主要议题", "待办事项", "决议内容", "谁负责什么？"];
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -144,6 +152,9 @@ export function ChatWorkspace({ meetings }: ChatWorkspaceProps) {
   );
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugTick, setDebugTick] = useState(0);
+  const [crossPrivacyScope, setCrossPrivacyScope] = useState<CrossPrivacyScope>("public_only");
+  const [crossUnlock, setCrossUnlock] = useState<UnlockGrant | null>(null);
+  const [meetingUnlocks, setMeetingUnlocks] = useState<Record<number, UnlockGrant>>({});
   const effectiveSelectedMeetingId = selectedMeetingId ?? meetings[0]?.id ?? null;
 
   const selectedMeeting = useMemo(
@@ -151,6 +162,33 @@ export function ChatWorkspace({ meetings }: ChatWorkspaceProps) {
       meetings.find((meeting) => meeting.id === effectiveSelectedMeetingId) ?? null,
     [effectiveSelectedMeetingId, meetings],
   );
+  const selectedMeetingUnlock = selectedMeeting ? meetingUnlocks[selectedMeeting.id] ?? null : null;
+  const selectedMeetingNeedsUnlock = Boolean(selectedMeeting?.is_private && !selectedMeetingUnlock);
+  const crossNeedsUnlock = mode === "cross" && crossPrivacyScope === "all" && !crossUnlock;
+
+  function rememberMeetingUnlock(result: PrivacyUnlockResponse) {
+    if (!selectedMeeting) return;
+    setMeetingUnlocks((current) => ({
+      ...current,
+      [selectedMeeting.id]: {
+        token: result.unlock_token,
+        expiresAt: result.expires_at,
+      },
+    }));
+  }
+
+  function rememberCrossUnlock(result: PrivacyUnlockResponse) {
+    setCrossUnlock({ token: result.unlock_token, expiresAt: result.expires_at });
+  }
+
+  function clearSelectedMeetingUnlock() {
+    if (!selectedMeeting) return;
+    setMeetingUnlocks((current) => {
+      const next = { ...current };
+      delete next[selectedMeeting.id];
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!IS_DEV) {
@@ -256,7 +294,7 @@ export function ChatWorkspace({ meetings }: ChatWorkspaceProps) {
               >
                 {meetings.map((meeting) => (
                   <option key={meeting.id} value={meeting.id}>
-                    {meeting.title} {formatMeetingListDate(meeting.created_at)}
+                    {meeting.title} {meeting.is_private ? "\uff08\u9690\u79c1\uff09" : ""} {formatMeetingListDate(meeting.created_at)}
                   </option>
                 ))}
               </select>
@@ -276,7 +314,7 @@ export function ChatWorkspace({ meetings }: ChatWorkspaceProps) {
             </div>
           </div>
         ) : (
-          <div className="info-strip">
+          <div className="info-strip space-y-4">
             <div className="text-[14px] font-semibold text-[var(--dark)]">{"\u8de8\u4f1a\u8bae\u68c0\u7d22"}</div>
             <div className="mt-1 text-[13px] text-[var(--text-secondary)]">
               {"\u4ece "}{meetings.length}{" \u573a\u5386\u53f2\u4f1a\u8bae\u77e5\u8bc6\u5e93\u4e2d\u5173\u8054\u68c0\u7d22\uff0c\u56de\u7b54\u65f6\u6807\u6ce8\u5f15\u7528\u6765\u6e90\u4f1a\u8bae\u3002"}
@@ -285,17 +323,60 @@ export function ChatWorkspace({ meetings }: ChatWorkspaceProps) {
               <Pill variant="project">{meetings.length} {"\u573a\u4f1a\u8bae"}</Pill>
               <Pill variant="muted">Top-5 RAG</Pill>
             </div>
+            <div className="segmented-toggle" aria-label={"\u68c0\u7d22\u8303\u56f4"}>
+              <button
+                type="button"
+                className={crossPrivacyScope === "public_only" ? "segment-active" : "segment-idle"}
+                onClick={() => setCrossPrivacyScope("public_only")}
+              >
+                {"\u4ec5\u975e\u9690\u79c1\u5185\u5bb9"}
+              </button>
+              <button
+                type="button"
+                className={crossPrivacyScope === "all" ? "segment-active" : "segment-idle"}
+                onClick={() => setCrossPrivacyScope("all")}
+              >
+                {"\u6240\u6709\u5185\u5bb9"}
+              </button>
+            </div>
+            <div className="text-[12px] leading-5 text-[var(--muted)]">
+              {crossPrivacyScope === "public_only"
+                ? "\u5f53\u524d\u53ea\u4f1a\u68c0\u7d22\u975e\u9690\u79c1\u4f1a\u8bae\u3002"
+                : crossUnlock
+                  ? `\u5df2\u89e3\u9501\u6240\u6709\u5185\u5bb9\uff0c\u6709\u6548\u81f3 ${new Date(crossUnlock.expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}\u3002`
+                  : "\u67e5\u8be2\u6240\u6709\u5185\u5bb9\u9700\u8981\u518d\u6b21\u9a8c\u8bc1\u767b\u5f55\u5bc6\u7801\u3002"}
+            </div>
           </div>
         )}
       </Card>
 
       <Card>
-        <ChatSessionPanel
-          key={mode === "cross" ? "cross" : `single-${selectedMeeting?.id ?? "none"}`}
-          mode={mode}
-          meeting={mode === "single" ? selectedMeeting : null}
-          totalMeetings={meetings.length}
-        />
+        {mode === "single" && selectedMeetingNeedsUnlock && selectedMeeting ? (
+          <PrivacyUnlockForm
+            scope="meeting"
+            meetingId={selectedMeeting.id}
+            title={"\u89e3\u9501\u8be5\u9690\u79c1\u4f1a\u8bae"}
+            description={"\u9a8c\u8bc1\u540e\u53ea\u4f1a\u5f00\u653e\u5f53\u524d\u9009\u4e2d\u4f1a\u8bae\u7684\u95ee\u7b54\u6743\u9650\u3002"}
+            onUnlocked={rememberMeetingUnlock}
+          />
+        ) : crossNeedsUnlock ? (
+          <PrivacyUnlockForm
+            scope="cross_chat_all"
+            title={"\u89e3\u9501\u6240\u6709\u4f1a\u8bae\u5185\u5bb9"}
+            description={"\u89e3\u9501\u6743\u9650\u6709\u6548\u671f\u4e3a 1 \u5c0f\u65f6\uff0c\u79bb\u5f00\u672c\u9875\u540e\u4f1a\u7acb\u5373\u6e05\u9664\u3002"}
+            onUnlocked={rememberCrossUnlock}
+          />
+        ) : (
+          <ChatSessionPanel
+            key={mode === "cross" ? `cross-${crossPrivacyScope}` : `single-${selectedMeeting?.id ?? "none"}`}
+            mode={mode}
+            meeting={mode === "single" ? selectedMeeting : null}
+            totalMeetings={meetings.length}
+            privacyScope={crossPrivacyScope}
+            unlockToken={mode === "cross" ? crossUnlock?.token ?? null : selectedMeetingUnlock?.token ?? null}
+            onUnlockRejected={mode === "cross" ? () => setCrossUnlock(null) : clearSelectedMeetingUnlock}
+          />
+        )}
       </Card>
     </div>
   );
@@ -305,9 +386,12 @@ type ChatSessionPanelProps = {
   mode: ChatMode;
   meeting: MeetingSummary | null;
   totalMeetings: number;
+  privacyScope: CrossPrivacyScope;
+  unlockToken: string | null;
+  onUnlockRejected: () => void;
 };
 
-function ChatSessionPanel({ mode, meeting, totalMeetings }: ChatSessionPanelProps) {
+function ChatSessionPanel({ mode, meeting, totalMeetings, privacyScope, unlockToken, onUnlockRejected }: ChatSessionPanelProps) {
   const { user } = useAuth();
   const initialAssistantMessage =
     mode === "cross"
@@ -329,9 +413,17 @@ function ChatSessionPanel({ mode, meeting, totalMeetings }: ChatSessionPanelProp
     mode,
     meetingId: mode === "single" ? meeting?.id ?? null : null,
     userId: user?.id,
+    privacyScope,
+    unlockToken,
+    persistSession: !(mode === "cross" && privacyScope === "all"),
     enabled: mode === "cross" || Boolean(meeting),
     initialAssistantMessage,
     onBeforeBootstrap: clearMeetingContextCache,
+    onBootstrapError: (_message, bootstrapError) => {
+      if (unlockToken && bootstrapError instanceof ApiError && bootstrapError.status === 403) {
+        onUnlockRejected();
+      }
+    },
   });
 
   function resetSession() {

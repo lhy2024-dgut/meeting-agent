@@ -1,6 +1,7 @@
 export type MeetingSummary = {
   id: number;
   title: string;
+  is_private: boolean;
   created_at: string | null;
   updated_at: string | null;
   duration_category: string;
@@ -166,6 +167,7 @@ export type MeetingTermsResponse = {
 export type MeetingDetail = {
   id: number;
   title: string;
+  is_private: boolean;
   created_at: string | null;
   updated_at: string | null;
   date_text: string;
@@ -301,6 +303,19 @@ export type ChatSessionCreateResponse = {
   meeting_id: number | null;
 };
 
+export type ChatSessionCreateRequest = {
+  mode?: "single" | "cross" | string;
+  meeting_id?: number | null;
+  privacy_scope?: "public_only" | "all" | string;
+  unlock_token?: string | null;
+};
+
+export type PrivacyUnlockResponse = {
+  unlock_token: string;
+  expires_at: string;
+  scope: "meeting" | "cross_chat_all" | string;
+};
+
 export type ChatMemoryStats = {
   round_count: number;
   max_rounds: number;
@@ -346,6 +361,7 @@ export type RealtimeSessionCreateRequest = {
   scene?: string;
   asr_model?: string;
   terms?: string[];
+  is_private?: boolean;
 };
 
 export type RealtimeSessionResponse = {

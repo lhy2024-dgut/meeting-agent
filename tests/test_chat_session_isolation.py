@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from time import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -68,3 +69,19 @@ def test_chat_session_manager_removes_expired_sessions():
 
     assert manager.get_session("expired") is None
     assert "expired" not in manager._sessions
+
+
+def test_chat_session_manager_removes_sessions_with_expired_authorization():
+    manager = ChatSessionManager()
+    manager._sessions["expired-auth"] = ChatSession(
+        session_id="expired-auth",
+        user_id=1,
+        mode="cross",
+        meeting_id=None,
+        agent=None,
+        last_accessed_at=0,
+        authorization_expires_at=time() - 1,
+    )
+
+    assert manager.get_session("expired-auth") is None
+    assert "expired-auth" not in manager._sessions

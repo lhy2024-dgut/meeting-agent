@@ -9,6 +9,7 @@ type MeetingEmailPanelProps = {
   meetingId: number;
   meetingTitle: string;
   dateText: string;
+  unlockToken?: string | null;
 };
 
 type RecipientMode = "contacts" | "groups";
@@ -17,6 +18,7 @@ export function MeetingEmailPanel({
   meetingId,
   meetingTitle,
   dateText,
+  unlockToken = null,
 }: MeetingEmailPanelProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<ContactGroup[]>([]);
@@ -61,7 +63,9 @@ export function MeetingEmailPanel({
       const [contactResponse, groupResponse, logResponse] = await Promise.all([
         requestBrowserJson<{ items: Contact[] }>("/contacts"),
         requestBrowserJson<{ items: ContactGroup[] }>("/contact-groups"),
-        requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`),
+        requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`, {
+          headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+        }),
       ]);
       setContacts(contactResponse.items);
       setGroups(groupResponse.items);
@@ -71,19 +75,21 @@ export function MeetingEmailPanel({
     } finally {
       setLoading(false);
     }
-  }, [meetingId]);
+  }, [meetingId, unlockToken]);
 
   // 由父页面通过 prop 或 HtmlSummaryPanel 通知是否已生成，
   // 避免在此重复发起 html-summary 请求造成不必要的 401 噪音。
   const checkHtmlSummary = useCallback(async () => {
     try {
-      await requestBrowserJson<{ html: string }>(`/meetings/${meetingId}/html-summary`);
+      await requestBrowserJson<{ html: string }>(`/meetings/${meetingId}/html-summary`, {
+        headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+      });
       setHtmlSummaryAvailable(true);
     } catch {
       setHtmlSummaryAvailable(false);
       setAttachHtmlSummary(false);
     }
-  }, [meetingId]);
+  }, [meetingId, unlockToken]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -111,6 +117,7 @@ export function MeetingEmailPanel({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : {}),
         },
         body: JSON.stringify({
           recipient_emails: recipients,
@@ -121,7 +128,9 @@ export function MeetingEmailPanel({
         }),
       });
       setResult(response);
-      const logsResponse = await requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`);
+      const logsResponse = await requestBrowserJson<{ items: EmailLog[] }>(`/meetings/${meetingId}/email-logs`, {
+        headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+      });
       setLogs(logsResponse.items);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "邮件发送失败");

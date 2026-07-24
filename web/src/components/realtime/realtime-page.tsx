@@ -56,6 +56,7 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
   // 实时转写固定使用 FunASR paraformer-zh-streaming 流式模型，无需选择
   const asrModel = "funasr-streaming";
   const [terms, setTerms] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [session, setSession] = useState<RealtimeSessionResponse | null>(null);
   const [error, setError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -236,6 +237,7 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
         scene,
         asr_model: asrModel,
         terms: parseTerms(terms),
+        is_private: isPrivate,
       });
       sessionIdRef.current = nextSession.session_id;
 
@@ -374,6 +376,22 @@ export function RealtimePage({ metadata }: RealtimePageProps) {
         </select>
 
         <textarea className="input-shell min-h-[120px]" value={terms} onChange={(event) => setTerms(event.target.value)} placeholder="术语词表（每行一个，可选）" disabled={Boolean(session)} />
+
+        <label className="info-strip flex cursor-pointer items-start gap-3">
+          <input
+            className="mt-1"
+            type="checkbox"
+            checked={isPrivate}
+            onChange={(event) => setIsPrivate(event.target.checked)}
+            disabled={Boolean(session)}
+          />
+          <span>
+            <span className="block text-[14px] font-semibold text-[var(--dark)]">{"\u9690\u79c1\u4f1a\u8bae"}</span>
+            <span className="mt-1 block text-[13px] leading-5 text-[var(--text-secondary)]">
+              {"\u751f\u6210\u4f1a\u8bae\u7eaa\u8981\u540e\uff0c\u5185\u5bb9\u8bbf\u95ee\u5c06\u53d7\u5bc6\u7801\u89e3\u9501\u4fdd\u62a4\u3002"}
+            </span>
+          </span>
+        </label>
 
         <div className="flex flex-wrap items-center gap-3">
           {!isRecording ? (

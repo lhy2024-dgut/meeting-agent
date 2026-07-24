@@ -8,9 +8,9 @@ import { requestBrowserJson } from "@/lib/browser-api";
 import { MeetingTermsResponse } from "@/types/api";
 import { useJobPolling } from "@/hooks/use-job-polling";
 
-type MeetingRegeneratePanelProps = { meetingId: number; };
+type MeetingRegeneratePanelProps = { meetingId: number; unlockToken?: string | null; };
 
-export function MeetingRegeneratePanel({ meetingId }: MeetingRegeneratePanelProps) {
+export function MeetingRegeneratePanel({ meetingId, unlockToken = null }: MeetingRegeneratePanelProps) {
   const router = useRouter();
   const [termsText, setTermsText] = useState("");
   const [loadingTerms, setLoadingTerms] = useState(true);
@@ -43,6 +43,7 @@ export function MeetingRegeneratePanel({ meetingId }: MeetingRegeneratePanelProp
         // handleUnauthorized 清除 token 并触发跳转登录。
         const response = await requestBrowserJson<MeetingTermsResponse>(
           `/meetings/${meetingId}/terms`,
+          { headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined },
         );
         if (!ignore) setTermsText(response.terms.join("\n"));
       } catch (loadError) {
@@ -53,7 +54,7 @@ export function MeetingRegeneratePanel({ meetingId }: MeetingRegeneratePanelProp
     }
     void loadTerms();
     return () => { ignore = true; };
-  }, [meetingId]);
+  }, [meetingId, unlockToken]);
 
   async function handleRegenerate() {
     const terms = termsText.split("\n").map((item) => item.trim()).filter(Boolean);
@@ -62,7 +63,9 @@ export function MeetingRegeneratePanel({ meetingId }: MeetingRegeneratePanelProp
     setSavedNotice("");
     resetJob();
     try {
-      const created = await regenerateMeeting(meetingId, { terms });
+      const created = await regenerateMeeting(meetingId, { terms }, {
+        headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+      });
       const initialJob = await startPolling(created.job_id);
       if (initialJob.status === "failed") {
         setSubmitting(false);

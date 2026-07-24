@@ -195,6 +195,7 @@ class MeetingRepository:
         duration_category,
         environment,
         file_hash="",
+        is_private=False,
         user_id=None,
         created_at=None,
     ):
@@ -207,6 +208,7 @@ class MeetingRepository:
                 duration_category=duration_category,
                 environment=environment,
                 file_hash=file_hash,
+                is_private=bool(is_private),
                 created_at=created_at or datetime.now(),
             )
             session.add(meeting)
@@ -311,7 +313,7 @@ class MeetingRepository:
                 return True
             return False
 
-    def get_meeting_by_hash(self, file_hash, user_id=None):
+    def get_meeting_by_hash(self, file_hash, user_id=None, is_private=None):
         if not file_hash:
             return None
         with self._read_session() as session:
@@ -321,7 +323,19 @@ class MeetingRepository:
                 .filter_by(file_hash=file_hash)
             )
             query = self._apply_user_filter(query, user_id)
+            if is_private is not None:
+                query = query.filter(Meeting.is_private == bool(is_private))
             return query.first()
+
+    def list_public_meeting_ids_for_user(self, user_id):
+        with self._read_session() as session:
+            query = (
+                session.query(Meeting.id)
+                .filter(Meeting.is_private.is_(False))
+            )
+            query = self._apply_user_filter(query, user_id)
+            rows = query.order_by(Meeting.created_at.desc()).all()
+            return [row.id for row in rows]
 
     def get_all_meetings(self, user_id=None):
         with self._read_session() as session:
@@ -378,6 +392,8 @@ class MeetingRepository:
                     ),
                     0,
                 ).label("overdue_todos"),
+            ).join(Meeting, TodoItem.meeting_id == Meeting.id).filter(
+                Meeting.is_private.is_(False)
             )
             if user_id is not None:
                 todo_summary_query = todo_summary_query.filter(TodoItem.user_id == user_id)
@@ -386,7 +402,10 @@ class MeetingRepository:
             assignee_query = session.query(
                 func.coalesce(TodoItem.assignee, "未指定").label("key"),
                 func.count(TodoItem.id).label("count"),
-            ).filter(TodoItem.status != "cancelled")
+            ).join(Meeting, TodoItem.meeting_id == Meeting.id).filter(
+                TodoItem.status != "cancelled",
+                Meeting.is_private.is_(False),
+            )
             if user_id is not None:
                 assignee_query = assignee_query.filter(TodoItem.user_id == user_id)
             assignee_rows = (

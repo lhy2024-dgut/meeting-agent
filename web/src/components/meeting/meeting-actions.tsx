@@ -1,19 +1,42 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
-import { getApiBaseUrl } from "@/lib/api";
+import { requestBrowserBlob } from "@/lib/browser-api";
 
 type MeetingActionsProps = {
   meetingId: number;
+  unlockToken?: string | null;
 };
 
-export function MeetingActions({ meetingId }: MeetingActionsProps) {
+export function MeetingActions({ meetingId, unlockToken = null }: MeetingActionsProps) {
   const [format, setFormat] = useState("docx");
-  const downloadHref = useMemo(() => {
-    const params = new URLSearchParams({ format });
-    return `${getApiBaseUrl()}/meetings/${meetingId}/exports/download?${params.toString()}`;
-  }, [format, meetingId]);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleDownload() {
+    setDownloading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ format });
+      const blob = await requestBrowserBlob(
+        `/meetings/${meetingId}/exports/download?${params.toString()}`,
+        {
+          headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+        },
+      );
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = `meeting-${meetingId}.${format}`;
+      anchor.click();
+      URL.revokeObjectURL(href);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "\u4e0b\u8f7d\u5931\u8d25\u3002");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -22,9 +45,10 @@ export function MeetingActions({ meetingId }: MeetingActionsProps) {
         <option value="md">md</option>
         <option value="pdf">pdf</option>
       </select>
-      <a className="success-link" href={downloadHref}>
-        {`\u4e0b\u8f7d / ${format}`}
-      </a>
+      <button className="success-link" type="button" onClick={() => void handleDownload()} disabled={downloading}>
+        {downloading ? "\u4e0b\u8f7d\u4e2d..." : `\u4e0b\u8f7d / ${format}`}
+      </button>
+      {error ? <div className="error-inline" role="alert">{error}</div> : null}
     </div>
   );
 }

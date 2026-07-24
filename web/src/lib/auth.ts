@@ -32,7 +32,10 @@ export function clearAuthTokens() {
   if (typeof window !== "undefined") {
     for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
       const key = window.sessionStorage.key(index);
-      if (key?.startsWith("meeting-agent-chat:")) {
+      if (
+        key?.startsWith("meeting-agent-chat:")
+        || key?.startsWith("meeting-agent-unlock:")
+      ) {
         window.sessionStorage.removeItem(key);
       }
     }

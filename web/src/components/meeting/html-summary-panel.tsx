@@ -9,9 +9,10 @@ import { Card } from "@/components/ui/cards";
 
 type HtmlSummaryPanelProps = {
   meetingId: number;
+  unlockToken?: string | null;
 };
 
-export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
+export function HtmlSummaryPanel({ meetingId, unlockToken = null }: HtmlSummaryPanelProps) {
   const [summary, setSummary] = useState<HtmlSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -25,7 +26,9 @@ export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
     // 用 requestBrowserJson 代替 getHtmlSummary（api.ts），避免 401 触发
     // handleUnauthorized → 清除 token → 跳转登录的死循环。
     // 404（尚未生成）和 401（token 短暂失效）均静默处理，只展示"生成"按钮。
-    requestBrowserJson<HtmlSummaryResponse>(`/meetings/${meetingId}/html-summary`)
+    requestBrowserJson<HtmlSummaryResponse>(`/meetings/${meetingId}/html-summary`, {
+      headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+    })
       .then((nextSummary) => {
         if (active) setSummary(nextSummary);
       })
@@ -35,7 +38,7 @@ export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
     return () => {
       active = false;
     };
-  }, [meetingId]);
+  }, [meetingId, unlockToken]);
 
   async function handleGenerate() {
     setLoading(true);
@@ -44,6 +47,8 @@ export function HtmlSummaryPanel({ meetingId }: HtmlSummaryPanelProps) {
       const nextSummary = await generateHtmlSummary(meetingId, {
         show_code: includeCode,
         show_flowchart: includeFlowchart,
+      }, {
+        headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
       });
       setSummary(nextSummary);
     } catch (generateError) {

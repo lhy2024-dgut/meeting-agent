@@ -58,6 +58,7 @@ class MeetingService:
         title,
         meeting_dt,
         user_id=None,
+        is_private=False,
         output_format="docx",
         template_path=None,
         progress_callback=None,
@@ -68,7 +69,11 @@ class MeetingService:
         chunk_strategy=None,
     ):
         """批量处理：ASR -> 分类 -> LLM -> 持久化 -> RAG -> 导出。"""
-        cached = self.db.get_meeting_by_hash(file_hash, user_id=user_id)
+        cached = self.db.get_meeting_by_hash(
+            file_hash,
+            user_id=user_id,
+            is_private=is_private,
+        )
         if not terms and cached and any(
             [cached.minutes_text, cached.action_items_text, cached.resolutions_text]
         ):
@@ -87,15 +92,16 @@ class MeetingService:
             file_hash,
             title,
             meeting_dt,
-            output_format,
-            template_path,
-            progress_callback,
+            output_format=output_format,
+            template_path=template_path,
+            progress_callback=progress_callback,
             scene=scene,
             custom_headings=custom_headings,
             terms=terms,
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            is_private=is_private,
         )
 
     def process_stream(
@@ -105,6 +111,7 @@ class MeetingService:
         title,
         meeting_dt,
         user_id=None,
+        is_private=False,
         output_format="docx",
         template_path=None,
         progress_callback=None,
@@ -174,15 +181,16 @@ class MeetingService:
             file_hash,
             title,
             meeting_dt,
-            output_format,
-            template_path,
-            progress_callback,
+            output_format=output_format,
+            template_path=template_path,
+            progress_callback=progress_callback,
             scene=scene,
             custom_headings=custom_headings,
             terms=terms,
             chunk_strategy=chunk_strategy,
             asr_model=asr_model,
             user_id=user_id,
+            is_private=is_private,
         )
         final["asr_time"] = asr_time
         yield {"type": "complete", "data": final}
@@ -201,6 +209,7 @@ class MeetingService:
         title,
         meeting_dt,
         user_id=None,
+        is_private=False,
         output_format="docx",
         template_path=None,
         progress_callback=None,
@@ -218,15 +227,16 @@ class MeetingService:
             file_hash,
             title,
             meeting_dt,
-            output_format,
-            template_path,
-            progress_callback,
+            output_format=output_format,
+            template_path=template_path,
+            progress_callback=progress_callback,
             scene=scene,
             custom_headings=custom_headings,
             terms=terms,
             chunk_strategy=chunk_strategy,
             asr_model="realtime-browser",
             user_id=user_id,
+            is_private=is_private,
         )
 
     def _handle_cache_hit(self, cached, output_format, template_path, progress_callback):
@@ -295,6 +305,7 @@ class MeetingService:
         chunk_strategy=None,
         asr_model=None,
         user_id=None,
+        is_private=False,
     ):
         """Steps 3-7: 分类 -> LLM 提取 -> 持久化 -> RAG 索引 -> 导出。"""
         if progress_callback:
@@ -307,6 +318,7 @@ class MeetingService:
             duration_category,
             environment,
             file_hash,
+            is_private=is_private,
             user_id=user_id,
             created_at=meeting_dt,
         )

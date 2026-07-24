@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from api.deps import get_current_user, get_meeting_repository
@@ -30,6 +30,11 @@ from chains.minutes_chain import (
 )
 from db.repository import MeetingRepository
 from prompts.templates import PromptTemplateLoader
+from services.privacy_service import (
+    MEETING_UNLOCK_TOKEN_TYPE,
+    PrivacyError,
+    validate_unlock_token,
+)
 from rag.retriever import get_retriever
 from services.file_service import FileService
 from services.meeting_service import ASR_MODEL_SENSEVOICE, MeetingService
@@ -70,9 +75,10 @@ def _build_duration_display(total_seconds: float) -> str:
 
 
 def _serialize_summary(meeting) -> MeetingSummary:
-    return MeetingSummary(
+    summary = MeetingSummary(
         id=meeting.id,
         title=meeting.title,
+        is_private=bool(getattr(meeting, "is_private", False)),
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         duration_category=meeting.duration_category or "",
@@ -84,6 +90,7 @@ def _serialize_summary(meeting) -> MeetingSummary:
         action_item_count=_count_action_items(meeting.action_items_text),
         resolution_count=_count_resolutions(meeting.resolutions_text),
     )
+    return _mask_private_summary(summary, meeting)
 
 
 def _serialize_segments(transcriptions) -> list[TranscriptSegment]:
@@ -140,6 +147,40 @@ def _get_owned_meeting(repo: MeetingRepository, meeting_id: int, user_id: int):
     return meeting
 
 
+def _require_meeting_access(
+    meeting,
+    current_user,
+    unlock_token: str | None,
+) -> None:
+    if not getattr(meeting, "is_private", False):
+        return
+    if not unlock_token:
+        raise HTTPException(status_code=403, detail="Meeting is private and requires unlock")
+    try:
+        validate_unlock_token(
+            unlock_token,
+            expected_type=MEETING_UNLOCK_TOKEN_TYPE,
+            user_id=current_user.id,
+            token_version=current_user.token_version or 0,
+            meeting_id=meeting.id,
+        )
+    except PrivacyError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _mask_private_summary(summary: MeetingSummary, meeting) -> MeetingSummary:
+    if not getattr(meeting, "is_private", False):
+        return summary
+    return summary.model_copy(
+        update={
+            "short_summary": "",
+            "project_name": "",
+            "action_item_count": 0,
+            "resolution_count": 0,
+        }
+    )
+
+
 def _get_meeting_todos(repo: MeetingRepository, user_id: int, meeting_id: int):
     service = TodoService(repo)
     items = service.list_todos(user_id, meeting_id=meeting_id)
@@ -192,7 +233,10 @@ def list_meetings(
         env_filter=environment_map.get(environment, "全部"),
         user_id=current_user.id,
     )
-    items = [_serialize_summary(meeting) for meeting in meetings]
+    items = [
+        _mask_private_summary(_serialize_summary(meeting), meeting)
+        for meeting in meetings
+    ]
     return MeetingListResponse(
         items=items,
         page=page,
@@ -205,10 +249,12 @@ def list_meetings(
 @router.get("/{meeting_id}", response_model=MeetingDetail)
 def get_meeting(
     meeting_id: int,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> MeetingDetail:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     todo_service = TodoService(repo)
     todo_service.sync_meeting_todos(
         current_user.id,
@@ -222,6 +268,7 @@ def get_meeting(
     return MeetingDetail(
         id=meeting.id,
         title=meeting.title,
+        is_private=bool(getattr(meeting, "is_private", False)),
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         date_text=meeting.created_at.strftime("%Y-%m-%d %H:%M") if meeting.created_at else "",
@@ -246,10 +293,12 @@ def get_meeting(
 @router.get("/{meeting_id}/transcript", response_model=TranscriptResponse)
 def get_transcript(
     meeting_id: int,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> TranscriptResponse:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     segments = _serialize_segments(meeting.transcriptions)
     full_text = " ".join(segment.text for segment in segments)
     updated_at = meeting.updated_at or meeting.created_at or datetime.now()
@@ -264,10 +313,12 @@ def get_transcript(
 @router.get("/{meeting_id}/html-summary", response_model=HtmlSummaryResponse)
 def get_html_summary(
     meeting_id: int,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> HtmlSummaryResponse:
-    _get_owned_meeting(repo, meeting_id, current_user.id)
+    meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     path = get_html_summary_path(meeting_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="HTML summary not found")
@@ -284,10 +335,12 @@ def get_html_summary(
 def generate_html_summary(
     meeting_id: int,
     payload: HtmlSummaryGenerateRequest,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> HtmlSummaryResponse:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     transcript = " ".join(item.text or "" for item in meeting.transcriptions)
     data = {
         "meeting_id": meeting.id,
@@ -319,10 +372,12 @@ def generate_html_summary(
 @router.get("/{meeting_id}/terms", response_model=MeetingTermsResponse)
 def get_meeting_terms(
     meeting_id: int,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> MeetingTermsResponse:
-    _get_owned_meeting(repo, meeting_id, current_user.id)
+    meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     return MeetingTermsResponse(meeting_id=meeting_id, terms=load_terms(meeting_id))
 
 
@@ -330,9 +385,12 @@ def get_meeting_terms(
 def update_meeting_project_name(
     meeting_id: int,
     payload: MeetingProjectUpdateRequest,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> MeetingMutationResponse:
+    meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     success = repo.update_meeting_project_name(
         meeting_id,
         (payload.project_name or "").strip(),
@@ -371,10 +429,12 @@ def delete_meeting(
 def regenerate_meeting(
     meeting_id: int,
     payload: MeetingRegenerateRequest,
+    unlock_token: str | None = Header(default=None, alias="X-Meeting-Unlock-Token"),
     repo: MeetingRepository = Depends(get_meeting_repository),
     current_user=Depends(get_current_user),
 ) -> CreateJobResponse:
     meeting = _get_owned_meeting(repo, meeting_id, current_user.id)
+    _require_meeting_access(meeting, current_user, unlock_token)
     if not meeting.audio_path:
         raise HTTPException(status_code=400, detail="Original audio file is missing")
 
@@ -488,6 +548,7 @@ async def process_meeting(
     transcription_mode: str = Form("auto"),
     terms: str | None = Form(None),
     template_name: str | None = Form(None),
+    is_private: bool = Form(False),
     current_user=Depends(get_current_user),
 ) -> CreateJobResponse:
     if not file.filename:
@@ -550,6 +611,7 @@ async def process_meeting(
             title,
             meeting_dt,
             user_id=current_user.id,
+            is_private=is_private,
             output_format=output_format,
             template_path=resolved_template_path,
             progress_callback=on_progress,

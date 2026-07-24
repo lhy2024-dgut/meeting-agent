@@ -50,6 +50,7 @@ export function UploadPage({ metadata }: UploadPageProps) {
   const [outputFormat, setOutputFormat] = useState(metadata.output_formats[0] ?? "docx");
   const [scene, setScene] = useState(metadata.scenes[0]?.scene ?? "");
   const [terms, setTerms] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templates, setTemplates] = useState<TemplateOption[]>(metadata.templates);
   const [submitting, setSubmitting] = useState(false);
@@ -94,6 +95,7 @@ export function UploadPage({ metadata }: UploadPageProps) {
       formData.append("scene", scene);
       if (terms.trim()) formData.append("terms", terms.trim());
       if (templateName) formData.append("template_name", templateName);
+      formData.append("is_private", String(isPrivate));
 
       const created = await createMeetingProcessJob(formData);
       const initialJob = await startPolling(created.job_id);
@@ -163,6 +165,22 @@ export function UploadPage({ metadata }: UploadPageProps) {
           </div>
 
           <textarea className="input-shell min-h-[120px]" value={terms} onChange={(event) => setTerms(event.target.value)} placeholder={"术语词表（每行一个，可选）"} />
+
+          <label className="info-strip flex cursor-pointer items-start gap-3">
+            <input
+              className="mt-1"
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(event) => setIsPrivate(event.target.checked)}
+              disabled={submitting}
+            />
+            <span>
+              <span className="block text-[14px] font-semibold text-[var(--dark)]">{"\u9690\u79c1\u4f1a\u8bae"}</span>
+              <span className="mt-1 block text-[13px] leading-5 text-[var(--text-secondary)]">
+                {"\u542f\u7528\u540e\uff0c\u8be6\u60c5\u3001\u5bfc\u51fa\u548c\u95ee\u7b54\u7b49\u5185\u5bb9\u64cd\u4f5c\u9700\u8981\u9a8c\u8bc1\u767b\u5f55\u5bc6\u7801\u3002"}
+              </span>
+            </span>
+          </label>
 
           <div className="flex items-center gap-3">
             <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "创建任务中..." : "开始生成会议纪要"}</button>

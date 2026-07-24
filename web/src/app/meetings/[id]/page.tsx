@@ -2,8 +2,8 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 
-import { MeetingDetailPage } from "@/components/meeting/meeting-detail-page";
-import { getMeeting, getTranscript } from "@/lib/api";
+import { MeetingDetailAccess } from "@/components/meeting/meeting-detail-access";
+import { ApiError, getMeeting, getTranscript } from "@/lib/api";
 import { MeetingSourceType } from "@/types/api";
 
 type MeetingPageProps = {
@@ -42,14 +42,22 @@ export default async function MeetingPage({
   const { id } = await params;
   const { source, snippet } = await searchParams;
 
-  const [meeting, transcript] = await Promise.all([
-    getMeeting(id).catch(() => null),
-    getTranscript(id).catch(() => null),
+  const [meetingResult, transcriptResult] = await Promise.allSettled([
+    getMeeting(id),
+    getTranscript(id),
   ]);
 
-  if (!meeting || !transcript) {
-    notFound();
+  const failedResult = [meetingResult, transcriptResult].find(
+    (result) => result.status === "rejected",
+  );
+  if (failedResult?.status === "rejected") {
+    const error = failedResult.reason;
+    if (error instanceof ApiError && error.status === 404) notFound();
+    if (!(error instanceof ApiError && error.status === 403)) throw error;
   }
+
+  const meeting = meetingResult.status === "fulfilled" ? meetingResult.value : null;
+  const transcript = transcriptResult.status === "fulfilled" ? transcriptResult.value : null;
 
   const normalizedSource = typeof source === "string" ? source.trim().toLowerCase() : "";
   const sourceType = VALID_SOURCE_TYPES.includes(normalizedSource as MeetingSourceType)
@@ -57,9 +65,10 @@ export default async function MeetingPage({
     : SOURCE_ALIASES[normalizedSource] ?? null;
 
   return (
-    <MeetingDetailPage
-      meeting={meeting}
-      transcript={transcript}
+    <MeetingDetailAccess
+      meetingId={Number(id)}
+      initialMeeting={meeting}
+      initialTranscript={transcript}
       highlightedSource={sourceType}
       highlightedSnippet={snippet ?? null}
     />

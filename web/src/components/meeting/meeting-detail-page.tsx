@@ -18,6 +18,7 @@ import { MeetingDetail, MeetingSourceType, TranscriptResponse } from "@/types/ap
 type MeetingDetailPageProps = {
   meeting: MeetingDetail;
   transcript: TranscriptResponse;
+  unlockToken?: string | null;
   highlightedSource?: MeetingSourceType | null;
   highlightedSnippet?: string | null;
 };
@@ -29,7 +30,7 @@ const SOURCE_LABELS: Record<MeetingSourceType, string> = {
   resolution: "决议",
 };
 
-export function MeetingDetailPage({ meeting, transcript, highlightedSource = null, highlightedSnippet = null }: MeetingDetailPageProps) {
+export function MeetingDetailPage({ meeting, transcript, unlockToken = null, highlightedSource = null, highlightedSnippet = null }: MeetingDetailPageProps) {
   const todoRef = useRef<HTMLDivElement | null>(null);
   const resolutionRef = useRef<HTMLDivElement | null>(null);
   const minutesRef = useRef<HTMLDivElement | null>(null);
@@ -99,7 +100,7 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
             {snippetFallback ? <span className="source-fallback-badge">{"未找到精确片段，已退回到对应区块"}</span> : null}
           </div>
         </div>
-        <MeetingActions meetingId={meeting.id} />
+        <MeetingActions meetingId={meeting.id} unlockToken={unlockToken} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">
@@ -110,7 +111,7 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
         <Card className="metric-box"><div className="metric-emoji blue-number">{meeting.transcript_count}</div><div className="metric-caption">{"转录片段"}</div></Card>
       </div>
 
-      <Card><MeetingRegeneratePanel meetingId={meeting.id} /></Card>
+      <Card><MeetingRegeneratePanel meetingId={meeting.id} unlockToken={unlockToken} /></Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         <div ref={todoRef}>
@@ -119,6 +120,7 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
               initialTodos={meeting.todos}
               meetingId={meeting.id}
               compact
+              unlockToken={unlockToken}
               title="待办事项"
             />
           </Card>
@@ -130,15 +132,16 @@ export function MeetingDetailPage({ meeting, transcript, highlightedSource = nul
 
       <div ref={transcriptRef}><Card className={highlightTranscript ? "source-highlight source-highlight-transcript" : ""}><details open={highlightTranscript}><summary className="expander-summary">{"查看原始转录文本"}</summary><div className="mt-4"><TranscriptList segments={transcript.segments} highlighted={highlightTranscript} /></div></details></Card></div>
 
-      <HtmlSummaryPanel meetingId={meeting.id} />
+      <HtmlSummaryPanel meetingId={meeting.id} unlockToken={unlockToken} />
 
       <MeetingEmailPanel
         meetingId={meeting.id}
         meetingTitle={meeting.title}
         dateText={meeting.date_text}
+        unlockToken={unlockToken}
       />
 
-      <Card><MeetingChat meetingId={meeting.id} /></Card>
+      <Card><MeetingChat meetingId={meeting.id} unlockToken={unlockToken} /></Card>
     </div>
   );
 }
