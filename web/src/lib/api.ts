@@ -18,6 +18,7 @@ import {
   MeetingListResponse,
   MeetingMutationResponse,
   MeetingTermsResponse,
+  PrivacyUnlockResponse,
   RealtimeSessionCreateRequest,
   RealtimeSessionMutationResponse,
   RealtimeSessionResponse,
@@ -53,6 +54,7 @@ let refreshPromise: Promise<string | null> | null = null;
 export type ApiRequestOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
+  headers?: HeadersInit;
 };
 
 type ApiErrorPayload = {
@@ -235,6 +237,13 @@ async function requestJson<T>(
 
   try {
     const headers = await resolveHeaders(init.headers);
+    if (options.headers) {
+      new Headers(options.headers).forEach((value, key) => {
+        if (!headers.has(key)) {
+          headers.set(key, value);
+        }
+      });
+    }
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       cache: "no-store",
@@ -842,11 +851,34 @@ export function createChatSession(
   payload: {
     mode: "single" | "cross";
     meeting_id?: number;
+    privacy_scope?: "public_only" | "all";
+    unlock_token?: string;
   },
   options?: ApiRequestOptions,
 ): Promise<ChatSessionCreateResponse> {
   return requestJson<ChatSessionCreateResponse>(
     "/chat/sessions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function unlockPrivacy(
+  payload: {
+    scope: "meeting" | "cross_chat_all";
+    meeting_id?: number;
+    password: string;
+  },
+  options?: ApiRequestOptions,
+): Promise<PrivacyUnlockResponse> {
+  return requestJson<PrivacyUnlockResponse>(
+    "/privacy/unlock",
     {
       method: "POST",
       headers: {

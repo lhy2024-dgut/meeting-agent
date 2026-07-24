@@ -8,6 +8,7 @@ from api.schemas.todos import TodoItemResponse
 class MeetingSummary(BaseModel):
     id: int
     title: str
+    is_private: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
     duration_category: str
@@ -44,6 +45,7 @@ class MeetingTermsResponse(BaseModel):
 class MeetingDetail(BaseModel):
     id: int
     title: str
+    is_private: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
     date_text: str

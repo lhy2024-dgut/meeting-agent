@@ -149,6 +149,7 @@ class TodoService:
         status: str | None = None,
         priority: str | None = None,
         include_cancelled: bool = True,
+        public_only: bool = False,
     ) -> list[TodoItem]:
         with self._read_session() as session:
             query = (
@@ -156,6 +157,10 @@ class TodoService:
                 .options(selectinload(TodoItem.status_logs))
             )
             query = self._apply_user_filter(query, TodoItem.user_id, user_id)
+            if public_only:
+                query = query.join(Meeting, TodoItem.meeting_id == Meeting.id).filter(
+                    Meeting.is_private.is_(False)
+                )
             if meeting_id is not None:
                 query = query.filter(TodoItem.meeting_id == meeting_id)
             if status:

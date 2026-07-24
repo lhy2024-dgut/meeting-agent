@@ -12,6 +12,7 @@ type TodoWorkspaceProps = {
   meetingId?: number;
   title?: string;
   compact?: boolean;
+  unlockToken?: string | null;
 };
 
 type Filters = {
@@ -62,11 +63,15 @@ export function TodoWorkspace({
   meetingId,
   title = "待办事项",
   compact = false,
+  unlockToken = null,
 }: TodoWorkspaceProps) {
   const [todos, setTodos] = useState(initialTodos);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const privacyOptions = unlockToken
+    ? { headers: { "X-Meeting-Unlock-Token": unlockToken } }
+    : undefined;
 
   const meetingMap = useMemo(
     () => new Map(meetings.map((item) => [item.id, item])),
@@ -103,7 +108,7 @@ export function TodoWorkspace({
         assignee: payload.assignee || null,
         due_date: payload.dueDate || null,
         priority: payload.priority,
-      });
+      }, privacyOptions);
       setTodos((current) => [created, ...current]);
       return true;
     } catch (createError) {
@@ -144,7 +149,7 @@ export function TodoWorkspace({
     try {
       const updated = await updateTodoStatus(todoId, {
         status,
-      });
+      }, privacyOptions);
       setTodos((current) =>
         current.map((item) => (item.id === todoId ? updated : item)),
       );
@@ -222,8 +227,9 @@ export function TodoWorkspace({
               todo={todo}
               compact={compact}
               meetingTitle={meetingMap.get(todo.meeting_id)?.title ?? null}
+              unlockToken={unlockToken}
               onUpdate={(payload) =>
-                mutateTodo(todo.id, () => updateTodo(todo.id, payload))
+                mutateTodo(todo.id, () => updateTodo(todo.id, payload, privacyOptions))
               }
               onStatusChange={(status) => changeTodoStatus(todo.id, status)}
             />
@@ -322,12 +328,14 @@ function TodoRow({
   meetingTitle,
   onUpdate,
   onStatusChange,
+  unlockToken,
 }: {
   todo: TodoItem;
   compact: boolean;
   meetingTitle: string | null;
   onUpdate: (payload: TodoUpdatePayload) => Promise<boolean>;
   onStatusChange: (status: TodoItem["status"]) => Promise<boolean>;
+  unlockToken: string | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(todo.content);
@@ -352,7 +360,9 @@ function TodoRow({
 
   async function toggleLogs() {
     if (!logsOpen && logs === null) {
-      const response = await getTodoLogs(todo.id);
+      const response = await getTodoLogs(todo.id, {
+        headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+      });
       setLogs(response.items);
     }
     setLogsOpen((current) => !current);
@@ -368,7 +378,9 @@ function TodoRow({
       if (updated) {
         setLogs(null);
         if (logsOpen) {
-          const response = await getTodoLogs(todo.id);
+          const response = await getTodoLogs(todo.id, {
+            headers: unlockToken ? { "X-Meeting-Unlock-Token": unlockToken } : undefined,
+          });
           setLogs(response.items);
         }
       }

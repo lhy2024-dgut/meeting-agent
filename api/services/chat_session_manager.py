@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, time
 
 from agents.chat_agent import ChatAgent
 
@@ -16,6 +16,7 @@ class ChatSession:
     meeting_id: int | None
     agent: ChatAgent
     last_accessed_at: float
+    authorization_expires_at: float | None = None
 
 
 class ChatSessionManager:
@@ -37,6 +38,7 @@ class ChatSessionManager:
         minutes: str = "",
         action_items: str = "",
         resolutions: str = "",
+        authorization_expires_at: float | None = None,
     ) -> ChatSession:
         agent = ChatAgent()
         if mode == "cross":
@@ -58,6 +60,7 @@ class ChatSessionManager:
             meeting_id=meeting_id,
             agent=agent,
             last_accessed_at=now,
+            authorization_expires_at=authorization_expires_at,
         )
         with self._lock:
             self._purge_expired_sessions(now)
@@ -75,6 +78,13 @@ class ChatSessionManager:
             now = monotonic()
             self._purge_expired_sessions(now)
             session = self._sessions.get(session_id)
+            if (
+                session
+                and session.authorization_expires_at is not None
+                and time() >= session.authorization_expires_at
+            ):
+                self._sessions.pop(session_id, None)
+                return None
             if session:
                 session.last_accessed_at = now
             return session

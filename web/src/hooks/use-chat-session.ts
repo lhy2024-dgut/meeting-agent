@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { ApiError, sendChatMessage } from "@/lib/api";
 import { requestBrowserJson } from "@/lib/browser-api";
@@ -18,10 +18,13 @@ type UseChatSessionOptions = {
   mode: ChatMode;
   meetingId?: number | null;
   userId?: number | null;
+  privacyScope?: "public_only" | "all";
+  unlockToken?: string | null;
+  persistSession?: boolean;
   enabled?: boolean;
   initialAssistantMessage?: string;
   onBeforeBootstrap?: () => void;
-  onBootstrapError?: (message: string) => void;
+  onBootstrapError?: (message: string, error: unknown) => void;
   maxInputLength?: number;
 };
 
@@ -50,6 +53,9 @@ export function useChatSession({
   mode,
   meetingId,
   userId,
+  privacyScope = "public_only",
+  unlockToken = null,
+  persistSession = true,
   enabled = true,
   initialAssistantMessage,
   onBeforeBootstrap,
@@ -66,7 +72,11 @@ export function useChatSession({
   const bootstrapRef = useRef(0);
   const restoredKeyRef = useRef<string | null>(null);
   const activeStorageKeyRef = useRef<string | null>(null);
-  const storageKey = `meeting-agent-chat:${userId ?? "anonymous"}:${mode}:${meetingId ?? "all"}`;
+  const storageKey = `meeting-agent-chat:${userId ?? "anonymous"}:${mode}:${meetingId ?? "all"}:${mode === "cross" ? privacyScope : unlockToken ? "private" : "public"}`;
+  const callBeforeBootstrap = useEffectEvent(() => onBeforeBootstrap?.());
+  const callBootstrapError = useEffectEvent((message: string, error: unknown) => {
+    onBootstrapError?.(message, error);
+  });
 
   useEffect(() => {
     if (!enabled) {
@@ -86,7 +96,7 @@ export function useChatSession({
     if (restoredKeyRef.current !== storageKey) {
       restoredKeyRef.current = storageKey;
       activeStorageKeyRef.current = null;
-      const persisted = readPersistedSession(storageKey);
+      const persisted = persistSession ? readPersistedSession(storageKey) : null;
       if (persisted) {
         activeStorageKeyRef.current = storageKey;
         const timer = window.setTimeout(() => {
@@ -105,7 +115,7 @@ export function useChatSession({
     }
 
     async function bootstrap() {
-      onBeforeBootstrap?.();
+      callBeforeBootstrap();
       setSessionId("");
       setMessages([]);
       setMemory(null);
@@ -123,6 +133,8 @@ export function useChatSession({
             body: JSON.stringify({
               mode,
               meeting_id: mode === "single" ? meetingId ?? undefined : undefined,
+              privacy_scope: mode === "cross" ? privacyScope : undefined,
+              unlock_token: unlockToken ?? undefined,
             }),
           },
         );
@@ -145,7 +157,7 @@ export function useChatSession({
         setSessionId("");
         setMessages([]);
         setError(message);
-        onBootstrapError?.(message);
+        callBootstrapError(message, bootstrapError);
       }
     }
 
@@ -154,11 +166,12 @@ export function useChatSession({
     return () => {
       active = false;
     };
-  }, [enabled, initialAssistantMessage, meetingId, mode, onBeforeBootstrap, onBootstrapError, refreshToken, storageKey, userId]);
+  }, [enabled, initialAssistantMessage, meetingId, mode, persistSession, privacyScope, refreshToken, storageKey, unlockToken, userId]);
 
   useEffect(() => {
     if (
       typeof window === "undefined" ||
+      !persistSession ||
       !sessionId ||
       activeStorageKeyRef.current !== storageKey
     ) {
@@ -166,7 +179,7 @@ export function useChatSession({
     }
     const payload: PersistedChatSession = { sessionId, messages, memory };
     window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
-  }, [memory, messages, sessionId, storageKey]);
+  }, [memory, messages, persistSession, sessionId, storageKey]);
 
   const submitMessage = useCallback(
     async (message: string) => {
@@ -198,7 +211,7 @@ export function useChatSession({
         return true;
       } catch (submitError) {
         if (submitError instanceof ApiError && submitError.status === 404) {
-          if (typeof window !== "undefined") {
+          if (persistSession && typeof window !== "undefined") {
             window.sessionStorage.removeItem(storageKey);
           }
           restoredKeyRef.current = null;
@@ -216,11 +229,11 @@ export function useChatSession({
         setLoading(false);
       }
     },
-    [loading, maxInputLength, sessionId, storageKey],
+    [loading, maxInputLength, persistSession, sessionId, storageKey],
   );
 
   const resetSession = useCallback(() => {
-    if (typeof window !== "undefined") {
+    if (persistSession && typeof window !== "undefined") {
       window.sessionStorage.removeItem(storageKey);
     }
     restoredKeyRef.current = null;
@@ -232,7 +245,7 @@ export function useChatSession({
     setError("");
     setLoading(false);
     setRefreshToken((current) => current + 1);
-  }, [storageKey]);
+  }, [persistSession, storageKey]);
 
   return {
     sessionId,

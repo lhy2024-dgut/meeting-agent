@@ -52,6 +52,7 @@ class RealtimeSessionState:
     scene: str
     asr_model: str
     terms: list[str] = field(default_factory=list)
+    is_private: bool = False
     status: str = "idle"
     message: str = "session created"
     transcript: str = ""
@@ -96,6 +97,7 @@ class RealtimeSessionManager:
         scene: str,
         asr_model: str,
         terms: list[str],
+        is_private: bool = False,
     ) -> RealtimeSessionState:
         session = RealtimeSessionState(
             session_id=uuid.uuid4().hex,
@@ -107,6 +109,7 @@ class RealtimeSessionManager:
             scene=scene,
             asr_model=asr_model,
             terms=terms,
+            is_private=is_private,
             status="recording",
             message="recording",
         )
@@ -389,6 +392,7 @@ class RealtimeSessionManager:
                 title=session.title,
                 meeting_dt=meeting_dt,
                 user_id=session.user_id,
+                is_private=session.is_private,
                 output_format=session.output_format,
                 scene=session.scene,
                 terms=session.terms or None,
@@ -407,6 +411,7 @@ class RealtimeSessionManager:
                 "scene": session.scene,
                 "asr_model": session.asr_model,
                 "terms": session.terms,
+                "is_private": session.is_private,
                 "status": session.status,
                 "message": session.message,
                 "transcript": session.transcript,

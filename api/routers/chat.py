@@ -11,6 +11,12 @@ from api.schemas.chat import (
 )
 from api.services.chat_session_manager import chat_session_manager
 from db.repository import MeetingRepository
+from services.privacy_service import (
+    CROSS_PRIVATE_CHAT_TOKEN_TYPE,
+    MEETING_UNLOCK_TOKEN_TYPE,
+    PrivacyError,
+    validate_unlock_token,
+)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -31,6 +37,7 @@ def create_chat_session(
     resolutions = ""
     meeting_id = payload.meeting_id
     meeting_ids = None
+    authorization_expires_at = None
 
     if mode == "single":
         if not meeting_id:
@@ -38,12 +45,44 @@ def create_chat_session(
         meeting = repo.get_meeting_by_id(meeting_id, user_id=current_user.id)
         if not meeting:
             raise HTTPException(status_code=404, detail="Meeting not found")
+        if getattr(meeting, "is_private", False):
+            if not payload.unlock_token:
+                raise HTTPException(status_code=403, detail="Meeting is private and requires unlock")
+            try:
+                claims = validate_unlock_token(
+                    payload.unlock_token,
+                    expected_type=MEETING_UNLOCK_TOKEN_TYPE,
+                    user_id=current_user.id,
+                    token_version=getattr(current_user, "token_version", 0) or 0,
+                    meeting_id=meeting.id,
+                )
+                authorization_expires_at = float(claims["exp"])
+            except PrivacyError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
         transcript = " ".join(item.text or "" for item in meeting.transcriptions)
         minutes = meeting.minutes_text or ""
         action_items = meeting.action_items_text or ""
         resolutions = meeting.resolutions_text or ""
     else:
-        meeting_ids = repo.list_meeting_ids_for_user(current_user.id)
+        privacy_scope = payload.privacy_scope or "public_only"
+        if privacy_scope == "public_only":
+            meeting_ids = repo.list_public_meeting_ids_for_user(current_user.id)
+        elif privacy_scope == "all":
+            if not payload.unlock_token:
+                raise HTTPException(status_code=403, detail="Unlock token is required for all-content search")
+            try:
+                claims = validate_unlock_token(
+                    payload.unlock_token,
+                    expected_type=CROSS_PRIVATE_CHAT_TOKEN_TYPE,
+                    user_id=current_user.id,
+                    token_version=getattr(current_user, "token_version", 0) or 0,
+                )
+                authorization_expires_at = float(claims["exp"])
+            except PrivacyError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            meeting_ids = repo.list_meeting_ids_for_user(current_user.id)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported privacy scope")
 
     session = chat_session_manager.create_session(
         user_id=current_user.id,
@@ -54,6 +93,7 @@ def create_chat_session(
         minutes=minutes,
         action_items=action_items,
         resolutions=resolutions,
+        authorization_expires_at=authorization_expires_at,
     )
     return ChatSessionCreateResponse(
         session_id=session.session_id,

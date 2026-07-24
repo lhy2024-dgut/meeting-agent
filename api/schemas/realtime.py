@@ -19,6 +19,7 @@ class RealtimeSessionCreateRequest(BaseModel):
     scene: str = "通用会议"
     asr_model: str = "faster-whisper"
     terms: list[str] = []
+    is_private: bool = False
 
 
 class RealtimeSessionResponse(BaseModel):
@@ -35,8 +36,8 @@ class RealtimeSessionResponse(BaseModel):
     transcript: str
     duration_seconds: float
     chunk_count: int
-    dropped_chunk_count: int = 0            # 解码连续失败被跳过的分片数（录音缺该段）
-    transcription_failed_count: int = 0     # 转写失败但录音保留的分片数（文字缺该段）
+    dropped_chunk_count: int = 0
+    transcription_failed_count: int = 0
     segments: list[RealtimeSegment]
     speaker_segments: list[RealtimeSegment]
     created_at: datetime
